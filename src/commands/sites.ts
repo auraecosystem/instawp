@@ -168,6 +168,12 @@ async function createSiteAction(opts: any): Promise<void> {
     const maxWait = 5 * 60 * 1000; // 5 minutes
     const pollInterval = 3000; // 3 seconds
     const taskId = site.task_id;
+    // Fetch site details once for php_version (available immediately at creation)
+    let phpVersion = opts.php || '8.x';
+    try {
+      const initDetail = await client.get(`/sites/${site.id}/details`);
+      phpVersion = initDetail.data?.data?.php_version || phpVersion;
+    } catch { /* use fallback */ }
     const provSpin = spinner('Setting up server environment...');
     provSpin.start();
 
@@ -214,7 +220,7 @@ async function createSiteAction(opts: any): Promise<void> {
         if (!shown.php && pct >= 38) {
           provSpin.text = 'Setting up server environment...';
           provSpin.stop();
-          step(`PHP ${opts.php || '8.x'} configured`);
+          step(`PHP ${phpVersion} configured`);
           shown.php = true;
           provSpin.start();
         }
@@ -223,7 +229,7 @@ async function createSiteAction(opts: any): Promise<void> {
           if (!shown.php) {
             provSpin.text = 'Setting up server environment...';
             provSpin.stop();
-            step(`PHP ${opts.php || '8.x'} configured`);
+            step(`PHP ${phpVersion} configured`);
             shown.php = true;
           }
           provSpin.text = 'Issuing SSL certificate...';
@@ -234,7 +240,7 @@ async function createSiteAction(opts: any): Promise<void> {
         }
 
         if (taskDone || pct >= 100) {
-          if (!shown.php) { provSpin.stop(); step(`PHP ${opts.php || '8.x'} configured`); shown.php = true; provSpin.start(); }
+          if (!shown.php) { provSpin.stop(); step(`PHP ${phpVersion} configured`); shown.php = true; provSpin.start(); }
           if (!shown.ssl) { provSpin.stop(); step('SSL certificate issued'); shown.ssl = true; provSpin.start(); }
           provSpin.stop();
           step('WordPress installed');
