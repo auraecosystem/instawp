@@ -178,6 +178,10 @@ async function createSiteAction(opts: any): Promise<void> {
     //   100% = completed
     const shown = { php: false, ssl: false, wp: false };
 
+    // Helper to update spinner with percentage
+    const spinText = (label: string, pct: number) =>
+      pct > 0 ? `${label} ${chalk.dim(`(${Math.round(pct)}%)`)}` : label;
+
     while (Date.now() - startTime < maxWait) {
       try {
         // Poll task status for real provisioning progress
@@ -197,26 +201,36 @@ async function createSiteAction(opts: any): Promise<void> {
           } catch { /* task endpoint may not be available, fall through */ }
         }
 
+        // Update spinner with current percentage
+        if (!shown.php) {
+          provSpin.text = spinText('Setting up server environment...', pct);
+        } else if (!shown.ssl) {
+          provSpin.text = spinText('Issuing SSL certificate...', pct);
+        } else if (!shown.wp) {
+          provSpin.text = spinText('Installing WordPress...', pct);
+        }
+
         // Show progressive steps based on actual task percentage
         if (!shown.php && pct >= 38) {
+          provSpin.text = 'Setting up server environment...';
           provSpin.stop();
           step(`PHP ${opts.php || '8.x'} configured`);
           shown.php = true;
           provSpin.start();
-          provSpin.text = 'Issuing SSL certificate...';
         }
 
         if (!shown.ssl && pct >= 66) {
           if (!shown.php) {
+            provSpin.text = 'Setting up server environment...';
             provSpin.stop();
             step(`PHP ${opts.php || '8.x'} configured`);
             shown.php = true;
           }
+          provSpin.text = 'Issuing SSL certificate...';
           provSpin.stop();
           step('SSL certificate issued');
           shown.ssl = true;
           provSpin.start();
-          provSpin.text = 'Installing WordPress...';
         }
 
         if (taskDone || pct >= 100) {
