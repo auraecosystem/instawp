@@ -167,37 +167,49 @@ async function createSiteAction(opts: any): Promise<void> {
 
     const maxWait = 5 * 60 * 1000; // 5 minutes
     const pollInterval = 3000; // 3 seconds
+    const taskId = site.task_id;
     const provSpin = spinner('Setting up server environment...');
     provSpin.start();
 
-    // Track which steps we've shown
+    // Track which steps we've shown based on task percentage:
+    //   ~38% = server environment ready (PHP configured)
+    //   ~66% = domain/SSL setup done
+    //   ~79% = WordPress being installed
+    //   100% = completed
     const shown = { php: false, ssl: false, wp: false };
 
     while (Date.now() - startTime < maxWait) {
       try {
-        const detailRes = await client.get(`/sites/${site.id}/details`);
-        const siteData = detailRes.data?.data;
-        const siteInfo = siteData?.site || siteData;
+        // Poll task status for real provisioning progress
+        let pct = 0;
+        let taskDone = false;
+        if (taskId) {
+          try {
+            const taskRes = await client.get(`/tasks/${taskId}/status`);
+            const task = taskRes.data?.data;
+            pct = parseFloat(task?.percentage_complete) || 0;
+            taskDone = task?.status === 'completed';
+            if (task?.status === 'error') {
+              provSpin.fail('Provisioning failed');
+              error('Site provisioning failed', task?.comment || 'Unknown error');
+              process.exit(1);
+            }
+          } catch { /* task endpoint may not be available, fall through */ }
+        }
 
-        // The API returns status as 0 (active) or string. Also check for url + wp_version
-        // as indicators that provisioning is complete.
-        const status = siteInfo?.status;
-        const isActive = status === 0 || status === 'Active' || status === 'active'
-          || (siteInfo?.url && siteInfo?.wp_version);
-
-        // Show progressive steps as data becomes available
-        if (!shown.php && siteInfo?.php_version) {
+        // Show progressive steps based on actual task percentage
+        if (!shown.php && pct >= 38) {
           provSpin.stop();
-          step(`PHP ${siteInfo.php_version} configured`);
+          step(`PHP ${opts.php || '8.x'} configured`);
           shown.php = true;
           provSpin.start();
           provSpin.text = 'Issuing SSL certificate...';
         }
 
-        if (!shown.ssl && (siteInfo?.url || isActive)) {
+        if (!shown.ssl && pct >= 66) {
           if (!shown.php) {
             provSpin.stop();
-            step(`PHP ${siteInfo?.php_version || opts.php || '8.x'} configured`);
+            step(`PHP ${opts.php || '8.x'} configured`);
             shown.php = true;
           }
           provSpin.stop();
@@ -207,29 +219,32 @@ async function createSiteAction(opts: any): Promise<void> {
           provSpin.text = 'Installing WordPress...';
         }
 
-        if (isActive) {
-          if (!shown.php) { provSpin.stop(); step(`PHP ${siteInfo?.php_version || opts.php || '8.x'} configured`); shown.php = true; provSpin.start(); }
+        if (taskDone || pct >= 100) {
+          if (!shown.php) { provSpin.stop(); step(`PHP ${opts.php || '8.x'} configured`); shown.php = true; provSpin.start(); }
           if (!shown.ssl) { provSpin.stop(); step('SSL certificate issued'); shown.ssl = true; provSpin.start(); }
           provSpin.stop();
           step('WordPress installed');
 
-          const siteUrl = siteInfo?.url || siteData?.url || '';
+          // Fetch final site details for the output
+          const detailRes = await client.get(`/sites/${site.id}/details`);
+          const siteData = detailRes.data?.data;
+          const siteInfo = siteData?.site || siteData;
+          const meta = siteInfo?.site_meta || siteData?.site_meta || {};
+
+          const siteUrl = siteInfo?.url || site.wp_url || '';
           const domain = siteInfo?.main_domain || siteInfo?.sub_domain
             || siteInfo?.domain?.name || siteInfo?.domain
             || siteData?.domain?.name || siteData?.domain || '';
           const wpVersion = siteInfo?.wp_version || '';
 
           if (json) {
-            // Details endpoint may have empty site_meta for recently provisioned sites;
-            // fallback to list endpoint which reliably includes credentials.
-            let meta = siteInfo?.site_meta || siteData?.site_meta || {};
-            if (!meta.wp_username) {
-              // Brief delay for credentials to propagate, then try list endpoint
-              await new Promise(resolve => setTimeout(resolve, 2000));
+            // If credentials not yet in details, try list endpoint
+            let creds = meta;
+            if (!creds.wp_username) {
               try {
                 const listRes = await client.get('/sites', { params: { per_page: 50 } });
                 const match = (listRes.data?.data || []).find((s: any) => s.id === site.id);
-                if (match?.site_meta?.wp_username) meta = match.site_meta;
+                if (match?.site_meta?.wp_username) creds = match.site_meta;
               } catch { /* ignore */ }
             }
             console.log(JSON.stringify({
@@ -240,8 +255,8 @@ async function createSiteAction(opts: any): Promise<void> {
                 domain,
                 wp_version: wpVersion,
                 php_version: siteInfo?.php_version || '',
-                wp_username: meta.wp_username || '',
-                wp_password: meta.wp_password || '',
+                wp_username: creds.wp_username || '',
+                wp_password: creds.wp_password || '',
                 wp_admin_url: siteUrl ? `${siteUrl}/wp-admin` : '',
                 status: 'Active',
                 elapsed: elapsed() + 's',
