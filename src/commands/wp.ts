@@ -30,15 +30,24 @@ export function registerWpCommand(program: Command): void {
         if (isJsonMode()) {
           console.log(JSON.stringify({ success: true, data }));
         } else {
-          // Print raw command output
+          // Print raw command output, stripping the timestamp+command echo line
+          const stripEcho = (s: string) => {
+            const lines = s.split('\n');
+            // First line is typically "YYYY-MM-DD HH:MM:SS wp ..." echo — skip it
+            if (lines[0] && /^\d{4}-\d{2}-\d{2}\s/.test(lines[0])) {
+              return lines.slice(1).join('\n').trim();
+            }
+            return s.trim();
+          };
           if (Array.isArray(data)) {
             for (const result of data) {
-              if (result.output) console.log(result.output);
+              const output = result.output || result;
+              console.log(typeof output === 'string' ? stripEcho(output) : JSON.stringify(output));
             }
-          } else if (data?.output) {
-            console.log(data.output);
           } else if (typeof data === 'string') {
-            console.log(data);
+            console.log(stripEcho(data));
+          } else if (data?.output) {
+            console.log(typeof data.output === 'string' ? stripEcho(data.output) : JSON.stringify(data.output));
           } else {
             console.log(JSON.stringify(data, null, 2));
           }

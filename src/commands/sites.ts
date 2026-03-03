@@ -46,13 +46,13 @@ export function registerSitesCommand(program: Command): void {
           name: s.name || '',
           domain: s.domain?.name || s.sub_domain || '',
           url: s.url || '',
-          status: s.status || (s.is_expired ? 'Expired' : 'Active'),
+          status: s.status === 0 ? 'Active' : s.is_expired ? 'Expired' : s.status || 'Unknown',
           wp_version: s.wp_version || '',
           php_version: s.php_version || '',
           created_at: s.created_at || '',
         }));
 
-        table(['ID', 'Name', 'Domain', 'Status', 'WP_Version', 'PHP_Version'], rows);
+        table(['ID', 'Name', 'URL', 'Status', 'WP Version', 'PHP Version'], rows);
       } catch (err: any) {
         spin.fail('Failed to fetch sites');
         error('Could not list sites', err.response?.data?.message || err.message);
@@ -178,7 +178,12 @@ async function createSiteAction(opts: any): Promise<void> {
         const detailRes = await client.get(`/sites/${site.id}/details`);
         const siteData = detailRes.data?.data;
         const siteInfo = siteData?.site || siteData;
+
+        // The API returns status as 0 (active) or string. Also check for url + wp_version
+        // as indicators that provisioning is complete.
         const status = siteInfo?.status;
+        const isActive = status === 0 || status === 'Active' || status === 'active'
+          || (siteInfo?.url && siteInfo?.wp_version);
 
         // Show progressive steps as data becomes available
         if (!shown.php && siteInfo?.php_version) {
@@ -189,7 +194,7 @@ async function createSiteAction(opts: any): Promise<void> {
           provSpin.text = 'Issuing SSL certificate...';
         }
 
-        if (!shown.ssl && (siteInfo?.is_ssl || siteInfo?.ssl_status || status === 'Active' || status === 'active')) {
+        if (!shown.ssl && (siteInfo?.url || isActive)) {
           if (!shown.php) {
             provSpin.stop();
             step(`PHP ${siteInfo?.php_version || opts.php || '8.x'} configured`);
@@ -202,17 +207,31 @@ async function createSiteAction(opts: any): Promise<void> {
           provSpin.text = 'Installing WordPress...';
         }
 
-        if (status === 'Active' || status === 'active') {
+        if (isActive) {
           if (!shown.php) { provSpin.stop(); step(`PHP ${siteInfo?.php_version || opts.php || '8.x'} configured`); shown.php = true; provSpin.start(); }
           if (!shown.ssl) { provSpin.stop(); step('SSL certificate issued'); shown.ssl = true; provSpin.start(); }
           provSpin.stop();
           step('WordPress installed');
 
           const siteUrl = siteInfo?.url || siteData?.url || '';
-          const domain = siteInfo?.domain?.name || siteInfo?.domain || siteData?.domain?.name || siteData?.domain || '';
+          const domain = siteInfo?.main_domain || siteInfo?.sub_domain
+            || siteInfo?.domain?.name || siteInfo?.domain
+            || siteData?.domain?.name || siteData?.domain || '';
           const wpVersion = siteInfo?.wp_version || '';
 
           if (json) {
+            // Details endpoint may have empty site_meta for recently provisioned sites;
+            // fallback to list endpoint which reliably includes credentials.
+            let meta = siteInfo?.site_meta || siteData?.site_meta || {};
+            if (!meta.wp_username) {
+              // Brief delay for credentials to propagate, then try list endpoint
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              try {
+                const listRes = await client.get('/sites', { params: { per_page: 50 } });
+                const match = (listRes.data?.data || []).find((s: any) => s.id === site.id);
+                if (match?.site_meta?.wp_username) meta = match.site_meta;
+              } catch { /* ignore */ }
+            }
             console.log(JSON.stringify({
               success: true,
               data: {
@@ -221,6 +240,9 @@ async function createSiteAction(opts: any): Promise<void> {
                 domain,
                 wp_version: wpVersion,
                 php_version: siteInfo?.php_version || '',
+                wp_username: meta.wp_username || '',
+                wp_password: meta.wp_password || '',
+                wp_admin_url: siteUrl ? `${siteUrl}/wp-admin` : '',
                 status: 'Active',
                 elapsed: elapsed() + 's',
               },
