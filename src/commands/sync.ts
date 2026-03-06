@@ -1,181 +1,147 @@
 import { Command } from 'commander';
-import { execSync } from 'node:child_process';
-import { requireAuth, getClient } from '../lib/api.js';
+import { spawnSync } from 'node:child_process';
+import { requireAuth } from '../lib/api.js';
+import { resolveSite } from '../lib/site-resolver.js';
+import { ensureSshAccess } from '../lib/ssh-keys.js';
+import { rsyncViaSsh } from '../lib/ssh-connection.js';
 import { success, error, spinner, info } from '../lib/output.js';
-import type { SftpCredentials } from '../types.js';
 
-function checkSshpass(): boolean {
-  try {
-    execSync('which sshpass', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+function checkRsync(): boolean {
+  const result = spawnSync('which', ['rsync'], { stdio: 'ignore' });
+  return result.status === 0;
 }
 
-function getSshpassInstallInstructions(): string {
+function getRsyncInstallInstructions(): string {
   const platform = process.platform;
-  if (platform === 'darwin') {
-    return 'Install sshpass: brew install hudochenkov/sshpass/sshpass';
-  } else if (platform === 'linux') {
-    return 'Install sshpass: sudo apt install sshpass  (or equivalent for your distro)';
-  }
-  return 'Install sshpass for your platform: https://github.com/kevinburke/sshpass';
+  if (platform === 'darwin') return 'Install rsync: brew install rsync';
+  if (platform === 'linux') return 'Install rsync: sudo apt install rsync  (or equivalent for your distro)';
+  return 'Install rsync for your platform.';
 }
 
-async function enableSftp(siteId: string): Promise<void> {
-  const client = getClient();
-  await client.post(`/sites/${siteId}/update-sftp-status`, { status: 1 });
-}
-
-async function getSftpCredentials(siteId: string): Promise<SftpCredentials> {
-  const client = getClient();
-  const res = await client.get(`/sites/${siteId}/sftp-details`);
-  const data = res.data?.data;
-  return {
-    host: data.host || data.ip,
-    username: data.username,
-    password: data.password,
-    port: data.port || 22,
-  };
+function buildRemotePath(conn: { username: string; domain: string }): string {
+  return `/home/${conn.username}/web/${conn.domain}/public_html/wp-content/`;
 }
 
 export function registerSyncCommand(program: Command): void {
   const sync = program
     .command('sync')
-    .description('Sync files with a remote site');
+    .description('Sync wp-content files with a remote site via rsync');
 
   sync
-    .command('push')
+    .command('push <site>')
     .description('Push local wp-content/ to remote site')
-    .requiredOption('--site <id>', 'Site ID')
     .option('--path <path>', 'Local wp-content path', './wp-content/')
-    .option('--remote-path <path>', 'Remote document root path')
+    .option('--exclude <pattern...>', 'Additional exclude patterns')
+    .option('--include <pattern...>', 'Include patterns')
     .option('--dry-run', 'Show what would be transferred')
-    .action(async (opts) => {
+    .action(async (siteIdentifier: string, opts) => {
       requireAuth();
 
-      if (!checkSshpass()) {
-        error('sshpass is required for sync.');
-        info(getSshpassInstallInstructions());
+      if (!checkRsync()) {
+        error('rsync is required for sync.');
+        info(getRsyncInstallInstructions());
         process.exit(1);
       }
 
-      const spin = spinner('Enabling SFTP access...');
+      const spin = spinner('Resolving site...');
       spin.start();
 
+      let site;
       try {
-        await enableSftp(opts.site);
-        spin.succeed('SFTP enabled');
-
-        const spin2 = spinner('Getting SFTP credentials...');
-        spin2.start();
-        const creds = await getSftpCredentials(opts.site);
-        spin2.succeed('Got SFTP credentials');
-
-        const remotePath = opts.remotePath || `/bitnami/wordpress/wp-content/`;
-        const localPath = opts.path.endsWith('/') ? opts.path : opts.path + '/';
-
-        const rsyncArgs = [
-          '-avz',
-          '--exclude=.git',
-          '--exclude=node_modules',
-          '--exclude=.DS_Store',
-          opts.dryRun ? '--dry-run' : '',
-          '-e', `"ssh -p ${creds.port} -o StrictHostKeyChecking=no"`,
-          localPath,
-          `${creds.username}@${creds.host}:${remotePath}`,
-        ].filter(Boolean).join(' ');
-
-        const cmd = `sshpass -p '${creds.password}' rsync ${rsyncArgs}`;
-
-        info(`Syncing ${localPath} -> ${creds.host}:${remotePath}`);
-        const spin3 = spinner('Pushing files...');
-        spin3.start();
-
-        try {
-          const output = execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
-          spin3.succeed('Push complete');
-          if (output.trim()) {
-            console.log(output);
-          }
-          success('Files pushed successfully');
-        } catch (err: any) {
-          spin3.fail('Push failed');
-          error('rsync failed', err.stderr || err.message);
-          process.exit(1);
-        }
-      } catch (err: any) {
-        spin.fail('Sync setup failed');
-        error('Could not set up sync', err.response?.data?.message || err.message);
+        site = await resolveSite(siteIdentifier);
+        spin.succeed(`Site: ${site.name || site.sub_domain} (ID: ${site.id})`);
+      } catch {
+        spin.fail('Site resolution failed');
         process.exit(1);
+      }
+
+      const conn = await ensureSshAccess(site.id);
+
+      const localPath = opts.path.endsWith('/') ? opts.path : opts.path + '/';
+      const remotePath = buildRemotePath(conn);
+      const remoteTarget = `${conn.username}@${conn.host}:${remotePath}`;
+
+      const extraArgs: string[] = [];
+      if (opts.exclude) {
+        for (const pattern of opts.exclude) {
+          extraArgs.push(`--exclude=${pattern}`);
+        }
+      }
+      if (opts.include) {
+        for (const pattern of opts.include) {
+          extraArgs.push(`--include=${pattern}`);
+        }
+      }
+
+      info(`Pushing ${localPath} -> ${conn.host}:${remotePath}`);
+      if (opts.dryRun) info('(dry run)');
+
+      const exitCode = rsyncViaSsh(conn, localPath, remoteTarget, extraArgs, !!opts.dryRun, true);
+
+      if (exitCode === 0) {
+        success('Push complete');
+      } else {
+        error(`rsync exited with code ${exitCode}`);
+        process.exit(exitCode);
       }
     });
 
   sync
-    .command('pull')
+    .command('pull <site>')
     .description('Pull remote wp-content/ to local')
-    .requiredOption('--site <id>', 'Site ID')
     .option('--path <path>', 'Local destination path', './wp-content/')
-    .option('--remote-path <path>', 'Remote document root path')
+    .option('--exclude <pattern...>', 'Additional exclude patterns')
+    .option('--include <pattern...>', 'Include patterns')
     .option('--dry-run', 'Show what would be transferred')
-    .action(async (opts) => {
+    .action(async (siteIdentifier: string, opts) => {
       requireAuth();
 
-      if (!checkSshpass()) {
-        error('sshpass is required for sync.');
-        info(getSshpassInstallInstructions());
+      if (!checkRsync()) {
+        error('rsync is required for sync.');
+        info(getRsyncInstallInstructions());
         process.exit(1);
       }
 
-      const spin = spinner('Enabling SFTP access...');
+      const spin = spinner('Resolving site...');
       spin.start();
 
+      let site;
       try {
-        await enableSftp(opts.site);
-        spin.succeed('SFTP enabled');
-
-        const spin2 = spinner('Getting SFTP credentials...');
-        spin2.start();
-        const creds = await getSftpCredentials(opts.site);
-        spin2.succeed('Got SFTP credentials');
-
-        const remotePath = opts.remotePath || `/bitnami/wordpress/wp-content/`;
-        const localPath = opts.path.endsWith('/') ? opts.path : opts.path + '/';
-
-        const rsyncArgs = [
-          '-avz',
-          '--exclude=.git',
-          '--exclude=node_modules',
-          '--exclude=.DS_Store',
-          opts.dryRun ? '--dry-run' : '',
-          '-e', `"ssh -p ${creds.port} -o StrictHostKeyChecking=no"`,
-          `${creds.username}@${creds.host}:${remotePath}`,
-          localPath,
-        ].filter(Boolean).join(' ');
-
-        const cmd = `sshpass -p '${creds.password}' rsync ${rsyncArgs}`;
-
-        info(`Syncing ${creds.host}:${remotePath} -> ${localPath}`);
-        const spin3 = spinner('Pulling files...');
-        spin3.start();
-
-        try {
-          const output = execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
-          spin3.succeed('Pull complete');
-          if (output.trim()) {
-            console.log(output);
-          }
-          success('Files pulled successfully');
-        } catch (err: any) {
-          spin3.fail('Pull failed');
-          error('rsync failed', err.stderr || err.message);
-          process.exit(1);
-        }
-      } catch (err: any) {
-        spin.fail('Sync setup failed');
-        error('Could not set up sync', err.response?.data?.message || err.message);
+        site = await resolveSite(siteIdentifier);
+        spin.succeed(`Site: ${site.name || site.sub_domain} (ID: ${site.id})`);
+      } catch {
+        spin.fail('Site resolution failed');
         process.exit(1);
+      }
+
+      const conn = await ensureSshAccess(site.id);
+
+      const localPath = opts.path.endsWith('/') ? opts.path : opts.path + '/';
+      const remotePath = buildRemotePath(conn);
+      const remoteSource = `${conn.username}@${conn.host}:${remotePath}`;
+
+      const extraArgs: string[] = [];
+      if (opts.exclude) {
+        for (const pattern of opts.exclude) {
+          extraArgs.push(`--exclude=${pattern}`);
+        }
+      }
+      if (opts.include) {
+        for (const pattern of opts.include) {
+          extraArgs.push(`--include=${pattern}`);
+        }
+      }
+
+      info(`Pulling ${conn.host}:${remotePath} -> ${localPath}`);
+      if (opts.dryRun) info('(dry run)');
+
+      const exitCode = rsyncViaSsh(conn, remoteSource, localPath, extraArgs, !!opts.dryRun, true);
+
+      if (exitCode === 0) {
+        success('Pull complete');
+      } else {
+        error(`rsync exited with code ${exitCode}`);
+        process.exit(exitCode);
       }
     });
 }

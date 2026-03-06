@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { requireAuth, getClient } from '../lib/api.js';
+import { resolveSite } from '../lib/site-resolver.js';
 import { success, error, table, spinner, info, isJsonMode } from '../lib/output.js';
 
 export function registerSitesCommand(program: Command): void {
@@ -72,11 +73,25 @@ export function registerSitesCommand(program: Command): void {
 
   // sites delete
   sites
-    .command('delete <id>')
-    .description('Delete a site')
+    .command('delete <site>')
+    .description('Delete a site (by ID, name, or domain)')
     .option('--force', 'Skip confirmation')
-    .action(async (id, opts) => {
+    .action(async (siteIdentifier, opts) => {
       requireAuth();
+
+      const spin = spinner('Resolving site...');
+      spin.start();
+
+      let site;
+      try {
+        site = await resolveSite(siteIdentifier);
+        spin.stop();
+      } catch {
+        spin.fail('Site resolution failed');
+        process.exit(1);
+      }
+
+      const label = site.name || site.sub_domain || String(site.id);
 
       if (!opts.force) {
         if (isJsonMode()) {
@@ -88,7 +103,7 @@ export function registerSitesCommand(program: Command): void {
         const readline = await import('node:readline');
         const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
         const answer = await new Promise<string>((resolve) => {
-          rl.question(`Are you sure you want to delete site ${id}? (y/N) `, resolve);
+          rl.question(`Are you sure you want to delete site "${label}" (ID: ${site.id})? (y/N) `, resolve);
         });
         rl.close();
 
@@ -98,16 +113,16 @@ export function registerSitesCommand(program: Command): void {
         }
       }
 
-      const spin = spinner(`Deleting site ${id}...`);
-      spin.start();
+      const spin2 = spinner(`Deleting site ${label}...`);
+      spin2.start();
 
       try {
         const client = getClient();
-        await client.delete(`/sites/${id}`);
-        spin.succeed(`Site ${id} deleted`);
-        success(`Site ${id} has been deleted`);
+        await client.delete(`/sites/${site.id}`);
+        spin2.stop();
+        success(`Site "${label}" (ID: ${site.id}) has been deleted`);
       } catch (err: any) {
-        spin.fail('Failed to delete site');
+        spin2.fail('Failed to delete site');
         error('Could not delete site', err.response?.data?.message || err.message);
         process.exit(1);
       }
@@ -278,13 +293,37 @@ async function createSiteAction(opts: any): Promise<void> {
                 wp_username: creds.wp_username || '',
                 wp_password: creds.wp_password || '',
                 wp_admin_url: siteUrl ? `${siteUrl}/wp-admin` : '',
+                magic_login_url: creds.wp_magic_login_url || (siteUrl ? `${siteUrl}/wp-login.php?instawp-magic-login=1` : ''),
                 status: 'Active',
                 elapsed: elapsed() + 's',
               },
             }));
           } else {
+            // Fetch credentials for human output too
+            let creds = meta;
+            if (!creds.wp_username) {
+              try {
+                const listRes = await client.get('/sites', { params: { per_page: 50 } });
+                const match = (listRes.data?.data || []).find((s: any) => s.id === site.id);
+                if (match?.site_meta?.wp_username) creds = match.site_meta;
+              } catch { /* ignore */ }
+            }
+
             const displayUrl = siteUrl || (domain ? `https://${domain}` : '');
             console.log(`\n${chalk.bold.green('Ready')} in ${elapsed()}s ${chalk.dim('\u2192')} ${chalk.cyan.underline(displayUrl)}`);
+
+            if (creds.wp_username) {
+              console.log(`\n  ${chalk.dim('Username:')} ${creds.wp_username}`);
+              console.log(`  ${chalk.dim('Password:')} ${creds.wp_password}`);
+            }
+            const adminUrl = displayUrl ? `${displayUrl}/wp-admin` : '';
+            if (adminUrl) {
+              console.log(`  ${chalk.dim('WP Admin:')} ${chalk.cyan.underline(adminUrl)}`);
+            }
+            const magicUrl = creds.wp_magic_login_url || (siteUrl ? `${siteUrl}/wp-login.php?instawp-magic-login=1` : '');
+            if (magicUrl) {
+              console.log(`  ${chalk.dim('Magic Login:')} ${chalk.cyan.underline(magicUrl)}`);
+            }
           }
           return;
         }

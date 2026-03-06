@@ -44,3 +44,42 @@ export interface ApiResponse<T = any> {
   data: T;
   message?: string;
 }
+
+export interface SiteDetails {
+  id: number;
+  name: string;
+  sub_domain: string;
+  url: string;
+  status: number;
+  wp_version: string;
+  php_version: string;
+  domain?: { name: string };
+  server_username?: string;
+  main_domain?: string;
+}
+
+export interface SshKeyInfo {
+  id: number;
+  label: string;
+  ssh_key: string;
+}
+
+export interface SshConnection {
+  host: string;
+  username: string;
+  port: number;
+  privateKeyPath: string;
+  siteId: number;
+  domain: string;
+}
+
+export interface SshConnectionCache {
+  connection: SshConnection;
+  cachedAt: number;
+}
+
+export interface TeamInfo {
+  id: number;
+  name: string;
+  created_at: string;
+}

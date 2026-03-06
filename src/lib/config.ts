@@ -1,5 +1,7 @@
 import Conf from 'conf';
-import type { UserInfo } from '../types.js';
+import type { UserInfo, SshConnectionCache } from '../types.js';
+
+const SSH_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
 const config = new Conf({
   projectName: 'instawp',
@@ -7,6 +9,7 @@ const config = new Conf({
     api_url: { type: 'string', default: 'https://app.instawp.io' },
     token: { type: 'string', default: '' },
     user: { type: 'object', default: {} },
+    ssh_cache: { type: 'object', default: {} },
   },
 });
 
@@ -41,4 +44,31 @@ export function setApiUrl(url: string): void {
 
 export function clearConfig(): void {
   config.clear();
+}
+
+export function getSshCache(siteId: number): SshConnectionCache | null {
+  const cache = config.get('ssh_cache') as Record<string, SshConnectionCache>;
+  const entry = cache?.[String(siteId)];
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > SSH_CACHE_TTL) {
+    clearSshCache(siteId);
+    return null;
+  }
+  return entry;
+}
+
+export function setSshCache(siteId: number, entry: SshConnectionCache): void {
+  const cache = (config.get('ssh_cache') as Record<string, SshConnectionCache>) || {};
+  cache[String(siteId)] = entry;
+  config.set('ssh_cache', cache);
+}
+
+export function clearSshCache(siteId?: number): void {
+  if (siteId !== undefined) {
+    const cache = (config.get('ssh_cache') as Record<string, SshConnectionCache>) || {};
+    delete cache[String(siteId)];
+    config.set('ssh_cache', cache);
+  } else {
+    config.set('ssh_cache', {});
+  }
 }
