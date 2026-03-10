@@ -55,9 +55,15 @@ jobs:
         run: |
           LAST_TAG=$(git tag -l 'release-notify/*' --sort=-creatordate | head -n1)
           if [ -z "$LAST_TAG" ]; then
-            echo "No previous release-notify tag found, using last 30 commits"
-            COMMIT_LOG=$(git log --oneline --no-merges -30)
-            DIFF_STATS=$(git diff --stat HEAD~30 HEAD 2>/dev/null || echo "Unable to get diff stats")
+            echo "No previous release-notify tag found, using merge commit only"
+            MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+            if [ -n "$MERGE_SHA" ]; then
+              COMMIT_LOG=$(git log --oneline --no-merges "${MERGE_SHA}^..${MERGE_SHA}")
+              DIFF_STATS=$(git diff --stat "${MERGE_SHA}^" "${MERGE_SHA}" 2>/dev/null || echo "Unable to get diff stats")
+            else
+              COMMIT_LOG=$(git log --oneline --no-merges -1)
+              DIFF_STATS=$(git diff --stat HEAD~1 HEAD 2>/dev/null || echo "Unable to get diff stats")
+            fi
           else
             echo "Last release-notify tag: $LAST_TAG"
             COMMIT_LOG=$(git log --oneline --no-merges "${LAST_TAG}..HEAD")
