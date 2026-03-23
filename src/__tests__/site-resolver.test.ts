@@ -11,6 +11,11 @@ vi.mock('../lib/output.js', () => ({
   info: vi.fn(),
 }));
 
+vi.mock('../lib/config.js', () => ({
+  getSiteCache: vi.fn().mockReturnValue(null),
+  setSiteCache: vi.fn(),
+}));
+
 // Mock process.exit to throw instead
 vi.mock('node:process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:process')>();

@@ -11,6 +11,7 @@ import { registerSyncCommand } from './commands/sync.js';
 import { registerSshCommand } from './commands/ssh.js';
 import { registerExecCommand, registerWpCommand } from './commands/exec.js';
 import { registerTeamsCommand } from './commands/teams.js';
+import { registerLocalCommand } from './commands/local.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json');
@@ -48,6 +49,9 @@ registerSyncCommand(program);
 // -- Teams --
 registerTeamsCommand(program);
 
+// -- Local dev --
+registerLocalCommand(program);
+
 // Custom help layout
 program.configureHelp({
   sortSubcommands: false,
@@ -73,13 +77,25 @@ ${d('Remote Access')}
   ${c('ssh')}   ${d('<site>')}          Interactive SSH session
   ${c('sync')}  ${d('push|pull')}       Sync wp-content via rsync
 
+${d('Local Development')}
+  ${c('local create')}       Create and start a local WordPress site
+  ${c('local clone')}        Clone an InstaWP cloud site to local
+  ${c('local start')}        Start an existing local site
+  ${c('local stop')}         Stop a background local site
+  ${c('local push')}         Push local wp-content to InstaWP cloud
+  ${c('local pull')}         Pull cloud wp-content to local site
+  ${c('local list')}         List local sites
+  ${c('local delete')}       Delete a local site
+
 ${d('Teams')}
   ${c('teams list')}         List teams
+  ${c('teams switch')}       Switch active team
   ${c('teams members')}      List team members
 
 ${d('Examples')}
   $ instawp login
   $ instawp create --name my-site
+  $ instawp local create --name blog
   $ instawp wp my-site plugin list
   $ instawp exec my-site php -v --api
   $ instawp ssh my-site

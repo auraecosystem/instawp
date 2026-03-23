@@ -15,7 +15,8 @@ export function registerSitesCommand(program: Command): void {
     .description('List all sites')
     .option('--status <status>', 'Filter by status')
     .option('--page <page>', 'Page number', '1')
-    .option('--per-page <count>', 'Results per page', '20')
+    .option('--per-page <count>', 'Results per page', '50')
+    .option('--all', 'Fetch all pages')
     .action(async (opts) => {
       requireAuth();
       const spin = spinner('Fetching sites...');
@@ -23,17 +24,33 @@ export function registerSitesCommand(program: Command): void {
 
       try {
         const client = getClient();
-        const params: Record<string, any> = {
-          page: parseInt(opts.page),
-          per_page: parseInt(opts.perPage),
-        };
+        let allSites: any[] = [];
+        let page = parseInt(opts.page);
+        const perPage = parseInt(opts.perPage);
+        let lastPage = 1;
+        let total = 0;
+
+        // Fetch first page
+        const params: Record<string, any> = { page, per_page: perPage };
         if (opts.status) params.status = opts.status;
 
         const res = await client.get('/sites', { params });
+        allSites = res.data?.data || [];
+        const meta = res.data?.meta || {};
+        lastPage = meta.last_page || 1;
+        total = meta.total || allSites.length;
+
+        // If --all, fetch remaining pages
+        if (opts.all && lastPage > page) {
+          for (let p = page + 1; p <= lastPage; p++) {
+            const r = await client.get('/sites', { params: { ...params, page: p } });
+            allSites = allSites.concat(r.data?.data || []);
+          }
+        }
+
         spin.stop();
 
-        const sites = res.data?.data || [];
-        if (sites.length === 0) {
+        if (allSites.length === 0) {
           if (isJsonMode()) {
             console.log(JSON.stringify([]));
           } else {
@@ -42,7 +59,7 @@ export function registerSitesCommand(program: Command): void {
           return;
         }
 
-        const rows = sites.map((s: any) => ({
+        const rows = allSites.map((s: any) => ({
           id: s.id,
           name: s.name || '',
           domain: s.domain?.name || s.sub_domain || '',
@@ -54,6 +71,11 @@ export function registerSitesCommand(program: Command): void {
         }));
 
         table(['ID', 'Name', 'URL', 'Status', 'WP Version', 'PHP Version'], rows);
+
+        // Show pagination hint if there are more pages and not fetching all
+        if (!opts.all && !isJsonMode() && lastPage > page) {
+          info(`Showing ${allSites.length} of ${total} sites (page ${page}/${lastPage}). Use --all to fetch all.`);
+        }
       } catch (err: any) {
         spin.fail('Failed to fetch sites');
         error('Could not list sites', err.response?.data?.message || err.message);

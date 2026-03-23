@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, closeSync } from 'node:fs';
 import type { SshConnection } from '../types.js';
 
 const KNOWN_HOSTS = path.join(homedir(), '.instawp', 'known_hosts');
@@ -49,6 +49,29 @@ export function execViaSsh(conn: SshConnection, command: string): { stdout: stri
   };
 }
 
+/**
+ * Execute a command via SSH and stream stdout directly to a file.
+ * Useful for large outputs like database dumps.
+ */
+export function execViaSshToFile(conn: SshConnection, command: string, outputPath: string): { exitCode: number; stderr: string } {
+  ensureKnownHosts();
+  const fd = openSync(outputPath, 'w');
+  try {
+    const result = spawnSync('ssh', ['-T', ...sshArgs(conn), sshTarget(conn)], {
+      input: command + '\n',
+      stdio: ['pipe', fd, 'pipe'],
+      encoding: 'utf-8',
+      maxBuffer: 500 * 1024 * 1024, // 500MB
+    });
+    return {
+      exitCode: result.status ?? 1,
+      stderr: (result.stderr as string) || '',
+    };
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function rsyncViaSsh(
   conn: SshConnection,
   source: string,
@@ -61,7 +84,8 @@ export function rsyncViaSsh(
   const sshCmd = `ssh -i ${conn.privateKeyPath} -p ${conn.port} -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=${KNOWN_HOSTS}`;
 
   const args = [
-    '-avz',
+    '-arz',
+    '--itemize-changes',
     '--exclude=.git',
     '--exclude=node_modules',
     '--exclude=.DS_Store',

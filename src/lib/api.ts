@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
-import { getToken, getApiUrl, clearConfig } from './config.js';
+import { getToken, getApiUrl, getTeamId, clearConfig } from './config.js';
 import { error } from './output.js';
 
 let client: AxiosInstance | null = null;
@@ -18,6 +18,11 @@ export function getClient(): AxiosInstance {
     const token = getToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+    // Inject team_id into all requests if set
+    const teamId = getTeamId();
+    if (teamId) {
+      config.params = { ...config.params, team_id: teamId };
     }
     return config;
   });

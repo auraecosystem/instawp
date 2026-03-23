@@ -22,34 +22,55 @@ src/
 │   ├── exec.ts              # exec + wp commands (merged, --api/--ssh transport)
 │   ├── ssh.ts               # Interactive SSH shell
 │   ├── sync.ts              # rsync push/pull via SSH
-│   └── teams.ts             # teams list/members
+│   ├── teams.ts             # teams list/switch/members
+│   └── local.ts             # local create/clone/start/stop/push/pull/list/delete
 ├── lib/
-│   ├── api.ts               # Axios client, auth interceptor, 401/429 handling
+│   ├── api.ts               # Axios client, auth interceptor, team_id injection
 │   ├── auth.ts              # OAuth flow (local HTTP server for callback)
 │   ├── config.ts            # Conf-based persistent config (~/.config/instawp/)
+│   ├── local-env.ts         # Playground server management, background mode
 │   ├── output.ts            # chalk/ora output helpers, --json mode
-│   ├── site-resolver.ts     # Resolve site by ID, name, or domain
+│   ├── site-resolver.ts     # Resolve site by ID/name/domain with caching
 │   ├── ssh-keys.ts          # SSH key generation, upload, caching
 │   └── ssh-connection.ts    # SSH/rsync spawn helpers
-└── __tests__/               # Vitest tests (148 tests)
+├── __tests__/               # Vitest tests (148 tests)
+scripts/
+└── mysql2sqlite             # MySQL→SQLite dump converter (vendored)
 ```
 
 ## Commands
 
 ```
+# Auth
 instawp login [--token <t>] [--api-url <url>]
 instawp whoami
-instawp sites list [--status <s>] [--page <n>]
-instawp sites create --name <n> [--php <v>] [--config <id>]
-instawp create --name <n>                    # alias for sites create
+
+# Sites (cloud)
+instawp sites list [--status <s>] [--page <n>] [--per-page <n>] [--all]
+instawp create --name <n> [--php <v>] [--config <id>]
 instawp sites delete <site> [--force]
+
+# Remote access
 instawp exec <site> <cmd...> [--api] [--timeout <s>]
-instawp wp <site> <args...> [--api]          # shorthand: prepends `wp` to args
+instawp wp <site> <args...> [--api]
 instawp ssh <site>
 instawp sync push <site> [--path] [--exclude] [--dry-run]
 instawp sync pull <site> [--path] [--exclude] [--dry-run]
+
+# Teams
 instawp teams list
+instawp teams switch [team]          # client-side team context
 instawp teams members <team>
+
+# Local development (powered by WordPress Playground)
+instawp local create [--name <n>] [--wp <v>] [--php <v>] [--background] [--no-open]
+instawp local clone <cloud-site> [--name <n>] [--no-start]
+instawp local start [name] [--background] [--no-open]
+instawp local stop [name]
+instawp local push <local-name> [cloud-site] [--dry-run]
+instawp local pull <local-name> <cloud-site> [--dry-run]
+instawp local list
+instawp local delete <name> [--force]
 ```
 
 All commands support `--json` for machine-readable output.
@@ -62,11 +83,41 @@ All commands support `--json` for machine-readable output.
 - `--api`: uses `POST /sites/{id}/run-cmd` API → cloud-app → InstaCP `v-instawp-run-cmd`
 - Both transports can run arbitrary commands (API is not WP-only despite the name)
 
-### Site resolution
+### Site resolution + caching
 - `resolveSite()` accepts ID (numeric), name, or domain
 - Numeric → direct `GET /sites/{id}/details`
 - String → fetches list, matches by name/sub_domain/domain, then fetches details
-- Errors on zero matches or ambiguous multiple matches
+- **Caches** name→ID mappings for 10 minutes (avoids list call on repeat lookups)
+
+### Team context
+- `teams switch` stores team_id locally (no server-side change)
+- API interceptor injects `team_id` as query param on all requests
+- Client-app `SiteService::getList()` already accepts `team_id` parameter
+
+### Local development architecture
+- Uses **WordPress Playground** (`@wp-playground/cli`) — WASM PHP + SQLite, no Docker needed
+- NOT a hard dependency — auto-downloaded via `npx`, faster if installed globally (`npm i -g @wp-playground/cli`)
+- Instance data stored at `~/.instawp/local/<name>/`
+- Fresh sites: mount entire `wp-content` before install (`--mount-before-install`)
+- Cloned sites: mount subdirs individually after install (`--mount`) so Playground sets up `db.php` internally
+
+### Clone flow (local clone)
+1. Export MySQL dump via SSH (`wp db export`)
+2. Strip SSH MOTD from dump output
+3. Convert MySQL → SQLite using `mysql2sqlite` (awk script)
+4. Import directly into `.ht.sqlite` via `sqlite3` CLI
+5. Rename table prefix to `wp_` (tables + meta keys + option names)
+6. Search-replace cloud URL → `http://127.0.0.1:<port>` across all tables
+7. Pull wp-content via rsync (plugins, themes, uploads)
+8. Pull non-core root files (CLAUDE.md, .htaccess, etc.)
+9. Generate blueprint with `WP_SQLITE_AST_DRIVER=true` + `login` step with actual admin username
+10. Write error suppression mu-plugin
+
+### Background mode
+- `--background` flag spawns detached process, polls until server responds, returns immediately
+- PID stored at `<instance>/server.pid`, logs at `<instance>/server.log`
+- `local stop` kills the background process
+- `local list` shows `running`/`stopped` status
 
 ### SSH key management
 - Auto-generates RSA 4096 key at `~/.instawp/cli_key` if needed
@@ -77,7 +128,25 @@ All commands support `--json` for machine-readable output.
 ### Config storage
 - Uses `conf` package → `~/.config/instawp/config.json`
 - Env overrides: `INSTAWP_TOKEN`, `INSTAWP_API_URL`
-- SSH cache with TTL stored alongside auth config
+- Stores: auth, SSH cache, site cache, team_id, local instances
+
+## Vendored Dependencies
+
+### `scripts/mysql2sqlite`
+- **Source**: https://github.com/dumblob/mysql2sqlite
+- **License**: MIT
+- **What**: AWK script that converts MySQL dump files to SQLite-compatible SQL
+- **Used by**: `local clone` for database import
+- **Version**: Vendored from master branch (2026-03-23)
+- **Update procedure**: Download latest from `https://raw.githubusercontent.com/dumblob/mysql2sqlite/master/mysql2sqlite` and replace `scripts/mysql2sqlite`. Test with `instawp local clone` on a WooCommerce site to verify compatibility.
+
+## Known Limitations
+
+### Local clone + SQLite
+- **WP_SQLITE_AST_DRIVER=true** is required for complex plugins (WooCommerce). The new AST-based SQLite driver (v2.2.1+) handles 99% of MySQL queries.
+- Some MySQL-specific queries may still fail at runtime (rare edge cases in complex plugins)
+- PHP deprecation warnings can crash WASM PHP — suppressed via mu-plugin (`error_reporting(E_ERROR | E_PARSE)`)
+- `downloads.w.org` is unreachable on some networks — connectivity pre-check warns the user
 
 ## API Endpoints Used
 
@@ -85,7 +154,7 @@ All commands support `--json` for machine-readable output.
 |----------|---------|
 | `GET /api/v2/sites` | sites list, site resolver |
 | `GET /api/v2/sites/{id}/details` | site resolver |
-| `POST /api/v2/sites` | sites create |
+| `POST /api/v2/sites` | sites create, local push (auto-create) |
 | `DELETE /api/v2/sites/{id}` | sites delete |
 | `POST /api/v2/sites/{id}/run-cmd` | exec --api, wp --api |
 | `GET /api/v2/tasks/{id}/status` | create (poll provisioning) |
@@ -113,6 +182,8 @@ npm run build
 node dist/index.js --help
 node dist/index.js login --token <test-token>
 node dist/index.js sites list
+node dist/index.js local create --name test --background --no-open
+node dist/index.js local stop test
 ```
 
 Or link globally:
@@ -127,8 +198,8 @@ instawp --help
 
 ```bash
 # Bump version in package.json, then:
-git tag v0.0.1-beta.1
-git push origin v0.0.1-beta.1
+git tag v0.0.1-beta.2
+git push origin v0.0.1-beta.2
 ```
 
 - Publishes with `--tag beta` (install via `npm i -g @instawp/cli@beta`)
@@ -142,3 +213,5 @@ git push origin v0.0.1-beta.1
 - Spinners stop before printing output (no interleaved text)
 - JSON mode returns `{ success, data }` or `{ success: false, error }`
 - Version reads from package.json at runtime (single source of truth)
+- rsync uses `--itemize-changes` (only shows actually changed files)
+- Terminal restored with `stty sane` after Playground exits

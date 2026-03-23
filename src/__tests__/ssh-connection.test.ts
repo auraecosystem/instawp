@@ -116,7 +116,8 @@ describe('ssh-connection', () => {
 
       expect(code).toBe(0);
       expect(mockSpawnSync).toHaveBeenCalledWith('rsync', expect.arrayContaining([
-        '-avz',
+        '-arz',
+        '--itemize-changes',
         '--exclude=.git',
         '--exclude=node_modules',
         '--exclude=.DS_Store',

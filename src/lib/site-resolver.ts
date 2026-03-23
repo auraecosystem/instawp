@@ -1,6 +1,14 @@
 import { getClient } from './api.js';
+import { getSiteCache, setSiteCache } from './config.js';
 import { error, info } from './output.js';
 import type { SiteDetails } from '../types.js';
+
+async function fetchSiteById(client: any, id: string | number): Promise<SiteDetails> {
+  const res = await client.get(`/sites/${id}/details`);
+  const data = res.data?.data;
+  const site = data?.site || data;
+  return normalizeSite(site, data);
+}
 
 export async function resolveSite(identifier: string): Promise<SiteDetails> {
   const client = getClient();
@@ -8,10 +16,7 @@ export async function resolveSite(identifier: string): Promise<SiteDetails> {
   // If purely numeric, fetch directly by ID
   if (/^\d+$/.test(identifier)) {
     try {
-      const res = await client.get(`/sites/${identifier}/details`);
-      const data = res.data?.data;
-      const site = data?.site || data;
-      return normalizeSite(site, data);
+      return await fetchSiteById(client, identifier);
     } catch (err: any) {
       if (err.response?.status === 404) {
         error(`No site found with ID ${identifier}. Use \`instawp sites list\` to see your sites.`);
@@ -22,7 +27,18 @@ export async function resolveSite(identifier: string): Promise<SiteDetails> {
     }
   }
 
-  // Otherwise, search by name/domain
+  // Check cache for name/domain → ID mapping
+  const cachedId = getSiteCache(identifier);
+  if (cachedId) {
+    try {
+      return await fetchSiteById(client, cachedId);
+    } catch (err: any) {
+      // Cache stale (site deleted?), fall through to fresh lookup
+      if (err.response?.status !== 404) throw err;
+    }
+  }
+
+  // Search by name/domain
   try {
     const res = await client.get('/sites', { params: { per_page: 100 } });
     const sites: any[] = res.data?.data || [];
@@ -49,15 +65,18 @@ export async function resolveSite(identifier: string): Promise<SiteDetails> {
       process.exit(1);
     }
 
-    // Single match — fetch full details
+    // Single match — cache the mapping and fetch full details
     const match = matches[0];
+    setSiteCache(identifier, match.id);
+
     try {
-      const detailRes = await client.get(`/sites/${match.id}/details`);
-      const data = detailRes.data?.data;
-      const site = data?.site || data;
-      return normalizeSite(site, data);
+      const details = await fetchSiteById(client, match.id);
+      // Also cache by name and domain for future lookups
+      if (match.name) setSiteCache(match.name, match.id);
+      if (match.sub_domain) setSiteCache(match.sub_domain, match.id);
+      if (match.domain?.name) setSiteCache(match.domain.name, match.id);
+      return details;
     } catch {
-      // Fall back to list data if details endpoint fails
       return normalizeSite(match, match);
     }
   } catch (err: any) {

@@ -83,3 +83,12 @@ export interface TeamInfo {
   name: string;
   created_at: string;
 }
+
+export interface LocalInstance {
+  name: string;
+  port: number;
+  php: string;
+  wp: string;
+  path: string;
+  createdAt: string;
+}

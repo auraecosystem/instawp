@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { requireAuth, getClient } from '../lib/api.js';
-import { success, error, table, spinner, isJsonMode } from '../lib/output.js';
+import { getTeamId, setTeamId, clearTeamId } from '../lib/config.js';
+import { success, error, table, spinner, info, isJsonMode } from '../lib/output.js';
 
 async function fetchTeams(): Promise<{ teams: any[]; current_team_id: number | null }> {
   const client = getClient();
@@ -62,12 +63,15 @@ export function registerTeamsCommand(program: Command): void {
           return;
         }
 
+        const cliTeamId = getTeamId();
+        const activeTeamId = cliTeamId || current_team_id;
+
         if (isJsonMode()) {
           const rows = teamList.map((t: any) => ({
             id: t.id,
             name: t.name,
             created_at: t.created_at || '',
-            is_current: t.id === current_team_id,
+            is_active: t.id === activeTeamId,
           }));
           console.log(JSON.stringify(rows));
           return;
@@ -75,14 +79,64 @@ export function registerTeamsCommand(program: Command): void {
 
         const rows = teamList.map((t: any) => ({
           id: t.id,
-          name: t.id === current_team_id ? `${t.name} (current)` : t.name,
+          name: t.id === activeTeamId ? `${t.name} (active)` : t.name,
           created_at: t.created_at || '',
         }));
 
         table(['ID', 'Name', 'Created At'], rows);
+        if (cliTeamId) {
+          info(`CLI team context set to ID ${cliTeamId}. Run 'teams switch' to clear.`);
+        }
       } catch (err: any) {
         spin.fail('Failed to fetch teams');
         error('Could not list teams', err.response?.data?.message || err.message);
+        process.exit(1);
+      }
+    });
+
+  // teams switch <team>
+  teams
+    .command('switch [team]')
+    .description('Switch active team context (by ID or name). Omit to reset.')
+    .action(async (teamArg?: string) => {
+      requireAuth();
+
+      // No argument = clear team context
+      if (!teamArg) {
+        clearTeamId();
+        if (isJsonMode()) {
+          console.log(JSON.stringify({ team_id: null }));
+        } else {
+          success('Team context cleared. Using default team.');
+        }
+        return;
+      }
+
+      const spin = spinner('Resolving team...');
+      spin.start();
+
+      try {
+        const teamId = await resolveTeamId(teamArg);
+        // Verify the team exists in user's teams
+        const { teams: teamList } = await fetchTeams();
+        const team = teamList.find((t: any) => t.id === teamId);
+        spin.stop();
+
+        if (!team) {
+          error(`You don't belong to team "${teamArg}"`);
+          process.exit(1);
+        }
+
+        setTeamId(teamId);
+
+        if (isJsonMode()) {
+          console.log(JSON.stringify({ team_id: team.id, team_name: team.name }));
+        } else {
+          success(`Switched to team: ${team.name} (ID: ${team.id})`);
+        }
+      } catch (err: any) {
+        spin.fail('Failed to switch team');
+        error('Could not switch team', err.response?.data?.message || err.message);
         process.exit(1);
       }
     });

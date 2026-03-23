@@ -1,7 +1,8 @@
 import Conf from 'conf';
-import type { UserInfo, SshConnectionCache } from '../types.js';
+import type { UserInfo, SshConnectionCache, LocalInstance } from '../types.js';
 
 const SSH_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+const SITE_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 const config = new Conf({
   projectName: 'instawp',
@@ -10,6 +11,9 @@ const config = new Conf({
     token: { type: 'string', default: '' },
     user: { type: 'object', default: {} },
     ssh_cache: { type: 'object', default: {} },
+    site_cache: { type: 'object', default: {} },
+    local_instances: { type: 'object', default: {} },
+    team_id: { type: 'number', default: 0 },
   },
 });
 
@@ -42,8 +46,65 @@ export function setApiUrl(url: string): void {
   config.set('api_url', url);
 }
 
+export function getTeamId(): number | null {
+  const id = config.get('team_id') as number;
+  return id || null;
+}
+
+export function setTeamId(id: number): void {
+  config.set('team_id', id);
+}
+
+export function clearTeamId(): void {
+  config.set('team_id', 0);
+}
+
 export function clearConfig(): void {
   config.clear();
+}
+
+// Site resolution cache: maps identifier (name/domain) → site ID
+interface SiteCacheEntry {
+  id: number;
+  cachedAt: number;
+}
+
+export function getSiteCache(identifier: string): number | null {
+  const cache = config.get('site_cache') as Record<string, SiteCacheEntry>;
+  const entry = cache?.[identifier.toLowerCase()];
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > SITE_CACHE_TTL) {
+    return null;
+  }
+  return entry.id;
+}
+
+export function setSiteCache(identifier: string, siteId: number): void {
+  const cache = (config.get('site_cache') as Record<string, SiteCacheEntry>) || {};
+  cache[identifier.toLowerCase()] = { id: siteId, cachedAt: Date.now() };
+  config.set('site_cache', cache);
+}
+
+// Local instance management
+export function getLocalInstances(): Record<string, LocalInstance> {
+  return (config.get('local_instances') as Record<string, LocalInstance>) || {};
+}
+
+export function getLocalInstance(name: string): LocalInstance | null {
+  const instances = getLocalInstances();
+  return instances[name] || null;
+}
+
+export function setLocalInstance(instance: LocalInstance): void {
+  const instances = getLocalInstances();
+  instances[instance.name] = instance;
+  config.set('local_instances', instances);
+}
+
+export function removeLocalInstance(name: string): void {
+  const instances = getLocalInstances();
+  delete instances[name];
+  config.set('local_instances', instances);
 }
 
 export function getSshCache(siteId: number): SshConnectionCache | null {
