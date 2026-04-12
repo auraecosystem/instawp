@@ -9,7 +9,8 @@
   "files": [
     "dist",
     "!dist/__tests__",
-    "scripts/mysql2sqlite"
+    "scripts/mysql2sqlite",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc",

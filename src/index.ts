@@ -52,6 +52,24 @@ registerTeamsCommand(program);
 // -- Local dev --
 registerLocalCommand(program);
 
+// -- Changelog --
+program
+  .command('changelog')
+  .description('Show recent changes')
+  .action(() => {
+    const changelogPath = new URL('../CHANGELOG.md', import.meta.url);
+    try {
+      const fs = require('fs');
+      const content = fs.readFileSync(changelogPath, 'utf-8');
+      // Show only the latest version
+      const sections = content.split(/\n## /);
+      const latest = sections[1] ? `## ${sections[1]}` : content;
+      console.log(latest.trim());
+    } catch {
+      console.log(`Changelog: https://github.com/InstaWP/cli/blob/main/CHANGELOG.md`);
+    }
+  });
+
 // Custom help layout
 program.configureHelp({
   sortSubcommands: false,
