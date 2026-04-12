@@ -80,12 +80,13 @@ export function registerLocalCommand(program: Command): void {
         };
 
         setLocalInstance(instance);
-        success(`Instance "${name}" created`);
 
-        console.log(`
-${chalk.dim('#')} Starting WordPress ${opts.wp} with PHP ${opts.php}...
-${chalk.dim('#')} Data stored at: ${chalk.dim(dir)}
-`);
+        if (!isJsonMode()) {
+          success(`Instance "${name}" created`);
+          console.log(`\n${chalk.dim('#')} Starting WordPress ${opts.wp} with PHP ${opts.php}...`);
+          console.log(`${chalk.dim('#')} Data stored at: ${chalk.dim(dir)}\n`);
+        }
+
         await launchServer(instance, opts);
       } catch (err: any) {
         spin.stop();
@@ -722,25 +723,47 @@ function printUrls(port: number): void {
 
 async function launchServer(instance: LocalInstance, opts: any): Promise<void> {
   const shouldOpen = opts.open !== false;
+  const json = isJsonMode();
 
   if (opts.background) {
-    const spin = spinner(`Starting "${instance.name}" in background...`);
-    spin.start();
+    const spin = json ? null : spinner(`Starting "${instance.name}" in background...`);
+    spin?.start();
     try {
       const { pid, url } = await startServerBackground(instance, opts.blueprint);
-      spin.succeed(`Running in background (PID: ${pid})`);
-      printUrls(instance.port);
+      if (json) {
+        console.log(JSON.stringify({
+          success: true,
+          data: {
+            name: instance.name,
+            url,
+            port: instance.port,
+            pid,
+            wp: instance.wp,
+            php: instance.php,
+            path: instance.path,
+          },
+        }));
+      } else {
+        spin?.succeed(`Running in background (PID: ${pid})`);
+        printUrls(instance.port);
+        info(`Stop with: instawp local stop ${instance.name}`);
+        info(`Logs: ${instance.path}/server.log`);
+      }
       if (shouldOpen) await openWpAdmin(url);
-      info(`Stop with: instawp local stop ${instance.name}`);
-      info(`Logs: ${instance.path}/server.log`);
     } catch (err: any) {
-      spin.fail('Failed to start');
-      error(err.message);
+      if (json) {
+        console.log(JSON.stringify({ success: false, error: err.message }));
+      } else {
+        spin?.fail('Failed to start');
+        error(err.message);
+      }
       process.exit(1);
     }
   } else {
-    printUrls(instance.port);
-    console.log(chalk.dim('\nPress Ctrl+C to stop.\n'));
+    if (!json) {
+      printUrls(instance.port);
+      console.log(chalk.dim('\nPress Ctrl+C to stop.\n'));
+    }
     try {
       await startServer(instance, {
         blueprint: opts.blueprint,
