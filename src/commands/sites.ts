@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { requireAuth, getClient } from '../lib/api.js';
+import { getApiUrl } from '../lib/config.js';
 import { resolveSite } from '../lib/site-resolver.js';
 import { success, error, table, spinner, info, isJsonMode } from '../lib/output.js';
 
@@ -88,6 +89,7 @@ export function registerSitesCommand(program: Command): void {
     .command('create')
     .description('Create a new WordPress site')
     .requiredOption('--name <name>', 'Site name')
+    .option('--wp <version>', 'WordPress version (e.g., 6.8)')
     .option('--php <version>', 'PHP version (e.g., 8.2)')
     .option('--config <id>', 'Configuration ID')
     .option('--no-wait', 'Do not wait for site to become active')
@@ -149,6 +151,167 @@ export function registerSitesCommand(program: Command): void {
         process.exit(1);
       }
     });
+
+  // sites update <site>
+  sites
+    .command('update <site>')
+    .description('Update site label, description, or expiration')
+    .option('--label <label>', 'Site label (max 30 chars)')
+    .option('--description <desc>', 'Site description (max 255 chars)')
+    .option('--expires <date>', 'Expiration date (YYYY-MM-DD or "never")')
+    .action(async (siteIdentifier: string, opts) => {
+      requireAuth();
+
+      if (!opts.label && !opts.description && !opts.expires) {
+        error('Provide at least one option: --label, --description, or --expires');
+        process.exit(1);
+      }
+
+      const spin = spinner('Resolving site...');
+      spin.start();
+
+      let site;
+      try {
+        site = await resolveSite(siteIdentifier);
+        spin.stop();
+      } catch {
+        spin.fail('Site resolution failed');
+        process.exit(1);
+      }
+
+      const payload: Record<string, any> = {};
+      if (opts.label) payload.label = opts.label;
+      if (opts.description) payload.description = opts.description;
+      if (opts.expires) {
+        payload.expired_at = opts.expires === 'never' ? null : `${opts.expires} 23:59:59`;
+      }
+
+      const updateSpin = spinner('Updating site...');
+      updateSpin.start();
+
+      try {
+        const client = getClient();
+        await client.patch(`/sites/${site.id}`, payload);
+        updateSpin.succeed('Site updated');
+
+        if (isJsonMode()) {
+          console.log(JSON.stringify({ success: true, site_id: site.id, changes: payload }));
+        } else {
+          if (opts.label) info(`Label → ${opts.label}`);
+          if (opts.description) info(`Description → ${opts.description}`);
+          if (opts.expires) info(`Expires → ${opts.expires === 'never' ? 'never' : opts.expires}`);
+        }
+      } catch (err: any) {
+        updateSpin.fail('Failed to update site');
+        error(err.response?.data?.message || err.message);
+        process.exit(1);
+      }
+    });
+
+  // sites php <site>
+  sites
+    .command('php <site>')
+    .description('View or update PHP settings for a site')
+    .option('--version <version>', 'Change PHP version (7.4, 8.0, 8.1, 8.2, 8.3)')
+    .option('--memory-limit <mb>', 'memory_limit in MB (64-1024)')
+    .option('--max-execution-time <sec>', 'max_execution_time in seconds (30-300)')
+    .option('--upload-max-filesize <mb>', 'upload_max_filesize in MB (64-512)')
+    .option('--post-max-size <mb>', 'post_max_size in MB (64-512)')
+    .option('--max-input-vars <n>', 'max_input_vars (1000-10000)')
+    .option('--max-input-time <sec>', 'max_input_time in seconds (60-120)')
+    .action(async (siteIdentifier: string, opts) => {
+      requireAuth();
+
+      const spin = spinner('Resolving site...');
+      spin.start();
+
+      let site;
+      try {
+        site = await resolveSite(siteIdentifier);
+        spin.stop();
+      } catch {
+        spin.fail('Site resolution failed');
+        process.exit(1);
+      }
+
+      const hasChanges = opts.version || opts.memoryLimit || opts.maxExecutionTime ||
+        opts.uploadMaxFilesize || opts.postMaxSize || opts.maxInputVars || opts.maxInputTime;
+
+      if (!hasChanges) {
+        // Show current PHP settings
+        const client = getClient();
+        try {
+          const res = await client.get(`/sites/${site.id}/details`);
+          const data = res.data?.data;
+          const siteData = data?.site || data;
+
+          if (isJsonMode()) {
+            console.log(JSON.stringify({
+              php_version: siteData.php_version,
+              php_config: siteData.php_config_json || {},
+            }));
+            return;
+          }
+
+          success(`${site.name || site.sub_domain} (ID: ${site.id})`);
+          console.log(`\n  ${chalk.dim('PHP Version:')} ${siteData.php_version || 'unknown'}`);
+
+          const config = siteData.php_config_json;
+          if (config && typeof config === 'object' && Object.keys(config).length > 0) {
+            console.log(`\n  ${chalk.dim('PHP Settings:')}`);
+            for (const [key, val] of Object.entries(config)) {
+              console.log(`    ${key}: ${val}`);
+            }
+          }
+        } catch (err: any) {
+          error('Could not fetch site details', err.response?.data?.message || err.message);
+          process.exit(1);
+        }
+        return;
+      }
+
+      // Apply changes
+      const payload: Record<string, any> = { php: {} };
+
+      if (opts.version) {
+        payload.php.version = opts.version;
+      }
+
+      const configurations: Record<string, number> = {};
+      if (opts.memoryLimit) configurations.memory_limit = parseInt(opts.memoryLimit);
+      if (opts.maxExecutionTime) configurations.max_execution_time = parseInt(opts.maxExecutionTime);
+      if (opts.uploadMaxFilesize) configurations.upload_max_filesize = parseInt(opts.uploadMaxFilesize);
+      if (opts.postMaxSize) configurations.post_max_size = parseInt(opts.postMaxSize);
+      if (opts.maxInputVars) configurations.max_input_vars = parseInt(opts.maxInputVars);
+      if (opts.maxInputTime) configurations.max_input_time = parseInt(opts.maxInputTime);
+
+      if (Object.keys(configurations).length > 0) {
+        payload.php.configurations = configurations;
+      }
+
+      const updateSpin = spinner('Updating PHP settings...');
+      updateSpin.start();
+
+      try {
+        const client = getClient();
+        await client.patch(`/sites/${site.id}`, payload);
+        updateSpin.succeed('PHP settings update initiated');
+
+        if (isJsonMode()) {
+          console.log(JSON.stringify({ success: true, site_id: site.id, changes: payload.php }));
+        } else {
+          if (opts.version) info(`PHP version → ${opts.version}`);
+          for (const [key, val] of Object.entries(configurations)) {
+            info(`${key} → ${val}`);
+          }
+          info('Changes are being applied. This may take a moment.');
+        }
+      } catch (err: any) {
+        updateSpin.fail('Failed to update PHP settings');
+        error(err.response?.data?.message || err.message);
+        process.exit(1);
+      }
+    });
 }
 
 // Shared create action used by both `sites create` and top-level `create`
@@ -171,6 +334,7 @@ async function createSiteAction(opts: any): Promise<void> {
     const payload: Record<string, any> = {
       site_name: opts.name,
     };
+    if (opts.wp) payload.wp_version = opts.wp;
     if (opts.php) payload.php_version = opts.php;
     if (opts.config) payload.configuration_id = parseInt(opts.config);
 
@@ -315,7 +479,7 @@ async function createSiteAction(opts: any): Promise<void> {
                 wp_username: creds.wp_username || '',
                 wp_password: creds.wp_password || '',
                 wp_admin_url: siteUrl ? `${siteUrl}/wp-admin` : '',
-                magic_login_url: creds.wp_magic_login_url || (siteUrl ? `${siteUrl}/wp-login.php?instawp-magic-login=1` : ''),
+                magic_login_url: creds.wp_magic_login_url || (siteInfo?.hash ? `${getApiUrl()}/wordpress-auto-login?site=${siteInfo.hash}` : ''),
                 status: 'Active',
                 elapsed: elapsed() + 's',
               },
@@ -342,7 +506,7 @@ async function createSiteAction(opts: any): Promise<void> {
             if (adminUrl) {
               console.log(`  ${chalk.dim('WP Admin:')} ${chalk.cyan.underline(adminUrl)}`);
             }
-            const magicUrl = creds.wp_magic_login_url || (siteUrl ? `${siteUrl}/wp-login.php?instawp-magic-login=1` : '');
+            const magicUrl = creds.wp_magic_login_url || (siteInfo?.hash ? `${getApiUrl()}/wordpress-auto-login?site=${siteInfo.hash}` : '');
             if (magicUrl) {
               console.log(`  ${chalk.dim('Magic Login:')} ${chalk.cyan.underline(magicUrl)}`);
             }
@@ -371,6 +535,7 @@ export function registerCreateAlias(program: Command): void {
     .command('create')
     .description('Create a new WordPress site (alias for sites create)')
     .requiredOption('--name <name>', 'Site name')
+    .option('--wp <version>', 'WordPress version (e.g., 6.8)')
     .option('--php <version>', 'PHP version (e.g., 8.2)')
     .option('--config <id>', 'Configuration ID')
     .option('--no-wait', 'Do not wait for site to become active')

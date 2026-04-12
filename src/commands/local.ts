@@ -216,6 +216,7 @@ ${chalk.dim('#')} Data stored at: ${chalk.dim(dir)}
   local
     .command('push <local-name> [cloud-site]')
     .description('Push local wp-content to an InstaWP cloud site')
+    .option('--include <pattern...>', 'Include patterns (e.g. .git)')
     .option('--exclude <pattern...>', 'Additional exclude patterns')
     .option('--dry-run', 'Show what would be transferred')
     .action(async (localName: string, cloudSiteArg: string | undefined, opts: any) => {
@@ -228,7 +229,7 @@ ${chalk.dim('#')} Data stored at: ${chalk.dim(dir)}
       }
 
       if (!checkRsync()) {
-        error('rsync is required. Install: brew install rsync');
+        error('rsync is required.' + (process.platform === 'win32' ? ' Install via Git for Windows or cwRsync.' : ' Install: brew install rsync'));
         process.exit(1);
       }
 
@@ -327,6 +328,7 @@ ${chalk.dim('#')} Data stored at: ${chalk.dim(dir)}
   local
     .command('pull <local-name> <cloud-site>')
     .description('Pull wp-content from an InstaWP cloud site to local')
+    .option('--include <pattern...>', 'Include patterns (e.g. .git)')
     .option('--exclude <pattern...>', 'Additional exclude patterns')
     .option('--dry-run', 'Show what would be transferred')
     .action(async (localName: string, cloudSiteArg: string, opts: any) => {
@@ -339,7 +341,7 @@ ${chalk.dim('#')} Data stored at: ${chalk.dim(dir)}
       }
 
       if (!checkRsync()) {
-        error('rsync is required. Install: brew install rsync');
+        error('rsync is required.' + (process.platform === 'win32' ? ' Install via Git for Windows or cwRsync.' : ' Install: brew install rsync'));
         process.exit(1);
       }
 
@@ -359,11 +361,17 @@ ${chalk.dim('#')} Data stored at: ${chalk.dim(dir)}
       const conn = await ensureSshAccess(site.id);
       const remotePath = `/home/${conn.username}/web/${conn.domain}/public_html/wp-content/`;
 
-      const extraArgs: string[] = [
+      const extraArgs: string[] = [];
+      if (opts.include) {
+        for (const pattern of opts.include) {
+          extraArgs.push(`--include=${pattern}`);
+        }
+      }
+      extraArgs.push(
         '--exclude=database', // Don't overwrite local SQLite database
         '--exclude=db.php',
         '--exclude=mu-plugins',
-      ];
+      );
       if (opts.exclude) {
         for (const pattern of opts.exclude) {
           extraArgs.push(`--exclude=${pattern}`);
@@ -390,11 +398,13 @@ ${chalk.dim('#')} Data stored at: ${chalk.dim(dir)}
     .description('Clone a complete InstaWP cloud site to local')
     .option('--name <name>', 'Local instance name (defaults to cloud site name)')
     .option('--no-start', 'Do not start the local site after cloning')
+    .option('--force', 'Overwrite existing local instance')
+    .option('--include <pattern...>', 'Include patterns for rsync (e.g. .git)')
     .action(async (cloudSiteArg: string, opts: any) => {
       requireAuth();
 
       if (!checkRsync()) {
-        error('rsync is required. Install: brew install rsync');
+        error('rsync is required.' + (process.platform === 'win32' ? ' Install via Git for Windows or cwRsync.' : ' Install: brew install rsync'));
         process.exit(1);
       }
 
@@ -415,8 +425,15 @@ ${chalk.dim('#')} Data stored at: ${chalk.dim(dir)}
       const name = sanitizeName(opts.name || site.name || site.sub_domain || `site-${site.id}`);
 
       if (instances[name]) {
-        error(`Local instance "${name}" already exists. Use --name to pick a different name.`);
-        process.exit(1);
+        if (!opts.force) {
+          error(`Local instance "${name}" already exists. Use --force to overwrite or --name to pick a different name.`);
+          process.exit(1);
+        }
+        // Force: delete existing instance first
+        stopServerProcess(instances[name]);
+        deleteInstanceDir(name);
+        removeLocalInstance(name);
+        info(`Existing instance "${name}" removed.`);
       }
 
       const port = await getNextPort(instances);
@@ -464,7 +481,14 @@ ${chalk.dim('#')} Data stored at: ${chalk.dim(dir)}
       const remoteSource = `${conn.username}@${conn.host}:${remotePath}`;
 
       info(`Pulling wp-content from ${chalk.dim(conn.domain)}...`);
+      const includeArgs: string[] = [];
+      if (opts.include) {
+        for (const pattern of opts.include) {
+          includeArgs.push(`--include=${pattern}`);
+        }
+      }
       const rsyncExit = rsyncViaSsh(conn, remoteSource, localWpContent, [
+        ...includeArgs,
         '--exclude=cache',
         '--exclude=upgrade',
         '--exclude=wflogs',
@@ -662,7 +686,8 @@ ${chalk.bold.green('Clone complete!')}
 }
 
 function checkRsync(): boolean {
-  const result = spawnSync('which', ['rsync'], { stdio: 'ignore' });
+  const cmd = process.platform === 'win32' ? 'where' : 'which';
+  const result = spawnSync(cmd, ['rsync'], { stdio: 'ignore' });
   return result.status === 0;
 }
 

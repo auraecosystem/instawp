@@ -7,7 +7,8 @@ import { rsyncViaSsh } from '../lib/ssh-connection.js';
 import { success, error, spinner, info } from '../lib/output.js';
 
 function checkRsync(): boolean {
-  const result = spawnSync('which', ['rsync'], { stdio: 'ignore' });
+  const cmd = process.platform === 'win32' ? 'where' : 'which';
+  const result = spawnSync(cmd, ['rsync'], { stdio: 'ignore' });
   return result.status === 0;
 }
 

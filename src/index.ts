@@ -69,6 +69,7 @@ ${d('Auth')}
 ${d('Sites')}
   ${c('create')}             Create a new WordPress site
   ${c('sites list')}         List all sites
+  ${c('sites php')}          View or update PHP version/settings
   ${c('sites delete')}       Delete a site
 
 ${d('Remote Access')}

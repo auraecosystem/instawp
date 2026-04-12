@@ -114,6 +114,17 @@ export function registerExecCommand(program: Command): void {
     .option('--api', 'Use API transport instead of SSH')
     .option('--timeout <seconds>', 'Command timeout in seconds (API mode only)', '30')
     .action(async (siteIdentifier: string, args: string[], opts) => {
+      // passThroughOptions may swallow --api/--timeout into args — extract them
+      const extractedApi = args.includes('--api');
+      const timeoutIdx = args.indexOf('--timeout');
+      let extractedTimeout: string | undefined;
+      if (timeoutIdx !== -1 && args[timeoutIdx + 1]) {
+        extractedTimeout = args[timeoutIdx + 1];
+        args = args.filter((_, i) => i !== timeoutIdx && i !== timeoutIdx + 1);
+      }
+      args = args.filter(a => a !== '--api');
+      if (extractedApi) opts.api = true;
+      if (extractedTimeout) opts.timeout = extractedTimeout;
       await execAction(siteIdentifier, args, opts);
     });
 }
@@ -127,6 +138,18 @@ export function registerWpCommand(program: Command): void {
     .option('--api', 'Use API transport instead of SSH')
     .option('--timeout <seconds>', 'Command timeout in seconds (API mode only)', '30')
     .action(async (siteIdentifier: string, args: string[], opts) => {
+      // passThroughOptions may swallow --api/--timeout into args — extract them
+      const extractedApi = args.includes('--api');
+      const timeoutIdx = args.indexOf('--timeout');
+      let extractedTimeout: string | undefined;
+      if (timeoutIdx !== -1 && args[timeoutIdx + 1]) {
+        extractedTimeout = args[timeoutIdx + 1];
+        args = args.filter((_, i) => i !== timeoutIdx && i !== timeoutIdx + 1);
+      }
+      args = args.filter(a => a !== '--api');
+      if (extractedApi) opts.api = true;
+      if (extractedTimeout) opts.timeout = extractedTimeout;
+
       await execAction(siteIdentifier, ['wp', ...args], opts);
     });
 }

@@ -46,12 +46,27 @@ export function registerLoginCommand(program: Command): void {
           const res = await client.get('/sites', { params: { per_page: 1 } });
           spin2.succeed('Token validated');
 
-          // Try to extract user info from response if available
-          // The sites endpoint may return user info in the meta/auth context
-          // If not, we at least know the token is valid
-          success('Logged in successfully', {
-            api_url: getApiUrl(),
-          });
+          // Fetch user and team info
+          let userName = '';
+          let teamName = '';
+          try {
+            const teamsRes = await client.get('/teams');
+            const currentTeamId = teamsRes.data?.current_team_id;
+            const teams = teamsRes.data?.data || [];
+            const currentTeam = teams.find((t: any) => t.id === currentTeamId);
+            teamName = currentTeam?.name || '';
+
+            // Get user info from team owner or first member
+            if (currentTeam?.owner) {
+              userName = currentTeam.owner.name || currentTeam.owner.email || '';
+              setUser({ id: currentTeam.owner.id, name: currentTeam.owner.name || '', email: currentTeam.owner.email || '' });
+            }
+          } catch { /* non-critical */ }
+
+          success('Logged in successfully');
+          if (userName) info(`User: ${userName}`);
+          if (teamName) info(`Team: ${teamName}`);
+          info(`API:  ${getApiUrl()}`);
         } catch (err: any) {
           spin2.fail('Token validation failed');
           error('Invalid token. Please check and try again.');

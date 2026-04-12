@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, unlinkSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -49,14 +49,20 @@ function parseKeyMaterial(pubContent: string): string {
 
 function generateCliKey(): { privatePath: string; pubContent: string } {
   ensureInstawpDir();
+
+  // Remove old key if it exists (so ssh-keygen doesn't prompt to overwrite)
   try {
-    // Use yes to auto-overwrite if an old key exists (e.g. wrong type)
-    execSync(`yes | ssh-keygen -t rsa -b 4096 -f "${CLI_KEY_PATH}" -N "" -C "instawp-cli"`, {
+    if (existsSync(CLI_KEY_PATH)) unlinkSync(CLI_KEY_PATH);
+    if (existsSync(CLI_KEY_PUB_PATH)) unlinkSync(CLI_KEY_PUB_PATH);
+  } catch { /* ignore */ }
+
+  try {
+    execSync(`ssh-keygen -t rsa -b 4096 -f "${CLI_KEY_PATH}" -N "" -C "instawp-cli"`, {
       stdio: 'ignore',
-      shell: '/bin/sh',
     });
   } catch {
     error('Failed to generate SSH key. Ensure ssh-keygen (OpenSSH) is installed.');
+    info('Windows: Settings → Apps → Optional Features → OpenSSH Client');
     process.exit(1);
   }
   return {

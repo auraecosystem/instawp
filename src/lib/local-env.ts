@@ -14,7 +14,8 @@ const DEFAULT_PORT_START = 9400;
  */
 function getPlaygroundCommand(): [string, string[]] {
   // Check for globally installed binary first (0.7s vs 1.4s npx overhead)
-  const result = spawnSync('which', ['wp-playground-cli'], { stdio: 'pipe' });
+  const cmd = process.platform === 'win32' ? 'where' : 'which';
+  const result = spawnSync(cmd, ['wp-playground-cli'], { stdio: 'pipe' });
   if (result.status === 0) {
     return ['wp-playground-cli', []];
   }
@@ -235,7 +236,9 @@ export function startServer(
       if (process.stdin.isTTY) {
         process.stdin.setRawMode?.(false);
       }
-      spawnSync('stty', ['sane'], { stdio: 'inherit' });
+      if (process.platform !== 'win32') {
+        spawnSync('stty', ['sane'], { stdio: 'inherit' });
+      }
       resolve(code ?? 0);
     });
   });
