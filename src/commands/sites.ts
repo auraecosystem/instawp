@@ -92,6 +92,7 @@ export function registerSitesCommand(program: Command): void {
     .option('--wp <version>', 'WordPress version (e.g., 6.8)')
     .option('--php <version>', 'PHP version (e.g., 8.2)')
     .option('--config <id>', 'Configuration ID')
+    .option('--temporary', 'Create as temporary site (default: permanent)')
     .option('--no-wait', 'Do not wait for site to become active')
     .action(createSiteAction);
 
@@ -333,6 +334,7 @@ async function createSiteAction(opts: any): Promise<void> {
     const client = getClient();
     const payload: Record<string, any> = {
       site_name: opts.name,
+      is_reserved: !opts.temporary,
     };
     if (opts.wp) payload.wp_version = opts.wp;
     if (opts.php) payload.php_version = opts.php;
@@ -538,6 +540,7 @@ export function registerCreateAlias(program: Command): void {
     .option('--wp <version>', 'WordPress version (e.g., 6.8)')
     .option('--php <version>', 'PHP version (e.g., 8.2)')
     .option('--config <id>', 'Configuration ID')
+    .option('--temporary', 'Create as temporary site (default: permanent)')
     .option('--no-wait', 'Do not wait for site to become active')
     .action(createSiteAction);
 }
