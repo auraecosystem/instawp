@@ -4,9 +4,11 @@ import { requireAuth } from '../lib/api.js';
 import { resolveSite } from '../lib/site-resolver.js';
 import { ensureSshAccess } from '../lib/ssh-keys.js';
 import { rsyncViaSsh } from '../lib/ssh-connection.js';
+import { bundledRsync } from '../lib/windows-binaries.js';
 import { success, error, spinner, info } from '../lib/output.js';
 
 function checkRsync(): boolean {
+  if (bundledRsync()) return true;
   const cmd = process.platform === 'win32' ? 'where' : 'which';
   const result = spawnSync(cmd, ['rsync'], { stdio: 'ignore' });
   return result.status === 0;

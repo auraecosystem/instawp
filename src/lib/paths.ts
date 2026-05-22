@@ -1,0 +1,40 @@
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+/**
+ * Convert a local filesystem path to a form rsync understands.
+ *
+ * rsync uses `host:path` syntax to mean "remote path", so a Windows path like
+ * `C:\Users\vikas\file` is interpreted as host `C` + path `\Users\vikas\file`,
+ * which fails. The fix is msys-style: `/c/Users/vikas/file`. This matches what
+ * rsync from Git for Windows expects and is accepted by cwRsync as well.
+ *
+ * Non-Windows: pass-through.
+ * Remote paths (containing `user@host:`): pass-through.
+ */
+export function toRsyncPath(p: string): string {
+  if (process.platform !== 'win32') return p;
+  // Already a remote spec like user@host:path
+  if (/^[^/\\:]+@[^:]+:/.test(p)) return p;
+  // Drive letter form: C:\foo\bar or C:/foo/bar  →  /c/foo/bar
+  const m = p.match(/^([A-Za-z]):[\\/](.*)$/);
+  if (m) {
+    return `/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`;
+  }
+  // UNC or other — just normalize separators
+  return p.replace(/\\/g, '/');
+}
+
+/**
+ * Resolve a path inside the CLI's installed directory (e.g. bundled scripts).
+ *
+ * `new URL(import.meta.url).pathname` returns `/C:/...` on Windows which is
+ * invalid. `fileURLToPath` returns a real OS path.
+ *
+ * @param importMetaUrl - pass `import.meta.url` from the calling module
+ * @param relative - segments relative to the calling module's directory
+ */
+export function resolveFromModule(importMetaUrl: string, ...relative: string[]): string {
+  const here = dirname(fileURLToPath(importMetaUrl));
+  return resolve(here, ...relative);
+}

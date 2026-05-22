@@ -3,8 +3,17 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdirSync, openSync, closeSync } from 'node:fs';
 import type { SshConnection } from '../types.js';
+import { toRsyncPath } from './paths.js';
+import { bundledRsync } from './windows-binaries.js';
 
 const KNOWN_HOSTS = path.join(homedir(), '.instawp', 'known_hosts');
+
+// Paths embedded into the rsync `-e ssh ...` command are parsed by rsync's
+// internal shell (msys/cygwin sh on Windows), where backslashes are escapes.
+// Use forward slashes throughout. The actual ssh.exe on Windows accepts both.
+function toSshPath(p: string): string {
+  return p.replace(/\\/g, '/');
+}
 
 function ensureKnownHosts(): void {
   const dir = path.dirname(KNOWN_HOSTS);
@@ -81,7 +90,9 @@ export function rsyncViaSsh(
   stream: boolean,
 ): number {
   ensureKnownHosts();
-  const sshCmd = `ssh -i ${conn.privateKeyPath} -p ${conn.port} -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=${KNOWN_HOSTS}`;
+  const keyPath = toSshPath(conn.privateKeyPath);
+  const knownHosts = toSshPath(KNOWN_HOSTS);
+  const sshCmd = `ssh -i "${keyPath}" -p ${conn.port} -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="${knownHosts}"`;
 
   const args = [
     '-arz',
@@ -92,11 +103,11 @@ export function rsyncViaSsh(
     ...(dryRun ? ['--dry-run'] : []),
     ...extraArgs,
     '-e', sshCmd,
-    source,
-    dest,
+    toRsyncPath(source),
+    toRsyncPath(dest),
   ];
 
-  const result = spawnSync('rsync', args, {
+  const result = spawnSync(bundledRsync() ?? 'rsync', args, {
     stdio: stream ? 'inherit' : ['pipe', 'pipe', 'pipe'],
     encoding: stream ? undefined : 'utf-8',
   });

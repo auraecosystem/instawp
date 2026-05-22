@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.0.1-beta.4 (2026-05-22)
+
+### Windows — Zero-Install Support
+- Bundled `rsync.exe` (with msys2 runtime DLLs) and BusyBox-w64 (`awk` provider) in `bin/win32/`. No more "install Git for Windows / cwRsync" prerequisite — `instawp local clone`, `local push/pull`, and `sync push/pull` work out of the box on Windows.
+- Replaced the external `sqlite3` CLI dependency with the `better-sqlite3` Node module.
+- New `src/lib/windows-binaries.ts` resolves bundled binaries; falls back to PATH then common Git-for-Windows install dirs.
+
+### Bug Fixes (Windows)
+- `instawp local clone` now resolves the bundled `mysql2sqlite` script correctly (was broken by `new URL(import.meta.url).pathname` returning `/C:/...`).
+- `mysql2sqlite` is invoked as `awk -f script` explicitly; no longer relies on shebang interpretation.
+- `rsync` no longer treats Windows drive paths (`C:\...`) as remote hostnames — paths are converted to msys style (`/c/...`) inside `rsyncViaSsh`.
+- `-e ssh -i <key>` argument uses forward slashes + quoted paths so msys/cygwin sh inside rsync parses the key path correctly.
+- Eliminated the SQL injection risk in `local clone`'s URL search-replace (now uses bound parameters via better-sqlite3).
+
+### Internals
+- New `scripts/fetch-windows-binaries.sh` (maintainer-only) refreshes the Windows bundle from MSYS2 + frippery.org.
+- 32 new tests covering path conversion and bundled-binary resolution.
+
 ## 0.0.1-beta.3 (2026-04-12)
 
 ### New Commands

@@ -1,9 +1,12 @@
 import { Command } from 'commander';
 import { spawnSync } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import chalk from 'chalk';
 import open from 'open';
+import Database from 'better-sqlite3';
+import { resolveFromModule } from '../lib/paths.js';
+import { bundledBusybox, bundledRsync } from '../lib/windows-binaries.js';
 import {
   getLocalInstances,
   getLocalInstance,
@@ -230,7 +233,7 @@ export function registerLocalCommand(program: Command): void {
       }
 
       if (!checkRsync()) {
-        error('rsync is required.' + (process.platform === 'win32' ? ' Install via Git for Windows or cwRsync.' : ' Install: brew install rsync'));
+        error('rsync is required.' + (process.platform === 'win32' ? ' Reinstall the CLI — the bundled rsync.exe is missing.' : ' Install: brew install rsync'));
         process.exit(1);
       }
 
@@ -342,7 +345,7 @@ export function registerLocalCommand(program: Command): void {
       }
 
       if (!checkRsync()) {
-        error('rsync is required.' + (process.platform === 'win32' ? ' Install via Git for Windows or cwRsync.' : ' Install: brew install rsync'));
+        error('rsync is required.' + (process.platform === 'win32' ? ' Reinstall the CLI — the bundled rsync.exe is missing.' : ' Install: brew install rsync'));
         process.exit(1);
       }
 
@@ -405,7 +408,7 @@ export function registerLocalCommand(program: Command): void {
       requireAuth();
 
       if (!checkRsync()) {
-        error('rsync is required.' + (process.platform === 'win32' ? ' Install via Git for Windows or cwRsync.' : ' Install: brew install rsync'));
+        error('rsync is required.' + (process.platform === 'win32' ? ' Reinstall the CLI — the bundled rsync.exe is missing.' : ' Install: brew install rsync'));
         process.exit(1);
       }
 
@@ -524,7 +527,7 @@ export function registerLocalCommand(program: Command): void {
         const dbSpin2 = spinner('Importing database...');
         dbSpin2.start();
         try {
-          const mysql2sqlitePath = resolve(join(new URL(import.meta.url).pathname, '..', '..', '..', 'scripts', 'mysql2sqlite'));
+          const mysql2sqlitePath = resolveFromModule(import.meta.url, '..', '..', 'scripts', 'mysql2sqlite');
           const dbDir = join(dir, 'wp-content', 'database');
           const sqliteDbPath = join(dbDir, '.ht.sqlite');
 
@@ -539,8 +542,15 @@ export function registerLocalCommand(program: Command): void {
             writeFileSync(dumpPath, rawDump.substring(sqlStart));
           }
 
-          // Convert MySQL → SQLite
-          const convertResult = spawnSync(mysql2sqlitePath, [dumpPath], {
+          // Convert MySQL → SQLite via awk (mysql2sqlite is an awk script).
+          // Windows doesn't honor shebangs, so invoke awk explicitly.
+          const awk = findAwk();
+          if (!awk) {
+            throw new Error('awk not found. ' + (process.platform === 'win32'
+              ? 'Reinstall the CLI — the bundled busybox.exe is missing.'
+              : 'Install awk/gawk.'));
+          }
+          const convertResult = spawnSync(awk.cmd, [...awk.prefixArgs, '-f', mysql2sqlitePath, dumpPath], {
             encoding: 'utf-8',
             maxBuffer: 500 * 1024 * 1024,
             timeout: 120000,
@@ -556,75 +566,74 @@ export function registerLocalCommand(program: Command): void {
             'DROP TABLE IF EXISTS `$2`;\n$1',
           );
 
-          // Write and import into SQLite
-          const tmpSql = join(dir, 'sqlite-import.sql');
-          writeFileSync(tmpSql, sqliteSql);
-          spawnSync('sqlite3', [sqliteDbPath], {
-            input: `.read ${tmpSql}\n`,
-            encoding: 'utf-8',
-            timeout: 120000,
-          });
+          // Import directly via better-sqlite3 (no external sqlite3 CLI needed)
+          const db = new Database(sqliteDbPath);
+          try {
+            db.exec(sqliteSql);
 
-          // Find the table prefix and rename to wp_
-          const tablesResult = spawnSync('sqlite3', [sqliteDbPath, '.tables'], { encoding: 'utf-8' });
-          const allTables = (tablesResult.stdout || '').split(/\s+/).filter(Boolean);
-          const optionsTable = allTables.find((t: string) => t.endsWith('_options'));
-          const oldPrefix = optionsTable ? optionsTable.replace('options', '') : 'wp_';
+            // Find the table prefix and rename to wp_
+            const tableRows = db.prepare(
+              "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            ).all() as { name: string }[];
+            const allTables = tableRows.map(r => r.name);
+            const optionsTable = allTables.find(t => t.endsWith('_options'));
+            const oldPrefix = optionsTable ? optionsTable.replace('options', '') : 'wp_';
 
-          if (oldPrefix !== 'wp_') {
-            // Rename tables
-            const renameStatements = allTables
-              .filter((t: string) => t.startsWith(oldPrefix))
-              .map((t: string) => `ALTER TABLE \`${t}\` RENAME TO \`wp_${t.substring(oldPrefix.length)}\`;`)
-              .join('\n');
-            spawnSync('sqlite3', [sqliteDbPath, renameStatements], { encoding: 'utf-8' });
+            if (oldPrefix !== 'wp_') {
+              const renames = allTables
+                .filter(t => t.startsWith(oldPrefix))
+                .map(t => `ALTER TABLE \`${t}\` RENAME TO \`wp_${t.substring(oldPrefix.length)}\``);
+              db.exec(renames.join(';\n') + ';');
 
-            // Rename meta keys and option names that contain the old prefix
-            const fixPrefixSql = [
-              `UPDATE wp_usermeta SET meta_key = REPLACE(meta_key, '${oldPrefix}', 'wp_') WHERE meta_key LIKE '${oldPrefix}%';`,
-              `UPDATE wp_options SET option_name = REPLACE(option_name, '${oldPrefix}', 'wp_') WHERE option_name LIKE '${oldPrefix}%';`,
-            ].join('\n');
-            spawnSync('sqlite3', [sqliteDbPath, fixPrefixSql], { encoding: 'utf-8' });
+              // Rename meta keys and option names that contain the old prefix
+              db.prepare(
+                'UPDATE wp_usermeta SET meta_key = REPLACE(meta_key, ?, ?) WHERE meta_key LIKE ?',
+              ).run(oldPrefix, 'wp_', oldPrefix + '%');
+              db.prepare(
+                'UPDATE wp_options SET option_name = REPLACE(option_name, ?, ?) WHERE option_name LIKE ?',
+              ).run(oldPrefix, 'wp_', oldPrefix + '%');
+            }
+
+            // Search-replace old cloud URL → localhost (bound params: no SQL injection)
+            const localUrl = `http://127.0.0.1:${instance.port}`;
+            const oldDomain = site.url || site.sub_domain || '';
+            const oldUrls = [
+              oldDomain,
+              oldDomain.replace('https://', 'http://'),
+            ].filter(Boolean);
+
+            const replaceStmts = [
+              'UPDATE wp_options SET option_value = REPLACE(option_value, ?, ?) WHERE option_value LIKE ?',
+              'UPDATE wp_posts SET post_content = REPLACE(post_content, ?, ?) WHERE post_content LIKE ?',
+              'UPDATE wp_posts SET guid = REPLACE(guid, ?, ?) WHERE guid LIKE ?',
+              'UPDATE wp_postmeta SET meta_value = REPLACE(meta_value, ?, ?) WHERE meta_value LIKE ?',
+              'UPDATE wp_comments SET comment_content = REPLACE(comment_content, ?, ?) WHERE comment_content LIKE ?',
+            ].map(s => db.prepare(s));
+
+            for (const oldUrl of oldUrls) {
+              const likePattern = '%' + oldUrl + '%';
+              for (const stmt of replaceStmts) {
+                stmt.run(oldUrl, localUrl, likePattern);
+              }
+            }
+            db.prepare(
+              "UPDATE wp_options SET option_value = ? WHERE option_name IN ('siteurl','home')",
+            ).run(localUrl);
+
+            // Get admin username for blueprint login step
+            const adminRow = db.prepare(
+              "SELECT user_login FROM wp_users WHERE ID = (SELECT user_id FROM wp_usermeta WHERE meta_key = 'wp_capabilities' AND meta_value LIKE '%administrator%' LIMIT 1)",
+            ).get() as { user_login?: string } | undefined;
+            adminUsername = adminRow?.user_login || 'admin';
+
+            const tableCount = (db.prepare(
+              "SELECT COUNT(*) AS c FROM sqlite_master WHERE type='table'",
+            ).get() as { c: number }).c;
+
+            dbSpin2.succeed(`Database imported (${tableCount} tables, admin: ${adminUsername})`);
+          } finally {
+            db.close();
           }
-
-          // Search-replace old cloud URL → localhost
-          const localUrl = `http://127.0.0.1:${instance.port}`;
-          const oldDomain = site.url || site.sub_domain || '';
-          const oldUrls = [
-            oldDomain,
-            oldDomain.replace('https://', 'http://'),
-          ].filter(Boolean);
-
-          for (const oldUrl of oldUrls) {
-            const replaceSql = [
-              `UPDATE wp_options SET option_value = REPLACE(option_value, '${oldUrl}', '${localUrl}') WHERE option_value LIKE '%${oldUrl}%';`,
-              `UPDATE wp_posts SET post_content = REPLACE(post_content, '${oldUrl}', '${localUrl}') WHERE post_content LIKE '%${oldUrl}%';`,
-              `UPDATE wp_posts SET guid = REPLACE(guid, '${oldUrl}', '${localUrl}') WHERE guid LIKE '%${oldUrl}%';`,
-              `UPDATE wp_postmeta SET meta_value = REPLACE(meta_value, '${oldUrl}', '${localUrl}') WHERE meta_value LIKE '%${oldUrl}%';`,
-              `UPDATE wp_comments SET comment_content = REPLACE(comment_content, '${oldUrl}', '${localUrl}') WHERE comment_content LIKE '%${oldUrl}%';`,
-            ].join('\n');
-            spawnSync('sqlite3', [sqliteDbPath, replaceSql], { encoding: 'utf-8' });
-          }
-          // Ensure siteurl/home are correct
-          spawnSync('sqlite3', [sqliteDbPath,
-            `UPDATE wp_options SET option_value='${localUrl}' WHERE option_name IN ('siteurl','home');`,
-          ], { encoding: 'utf-8' });
-
-          // Get admin username for blueprint login step
-          const adminResult = spawnSync('sqlite3', [sqliteDbPath,
-            "SELECT user_login FROM wp_users WHERE ID = (SELECT user_id FROM wp_usermeta WHERE meta_key = 'wp_capabilities' AND meta_value LIKE '%administrator%' LIMIT 1);",
-          ], { encoding: 'utf-8' });
-          adminUsername = (adminResult.stdout || '').trim() || 'admin';
-
-          // Count tables for output
-          const countResult = spawnSync('sqlite3', [sqliteDbPath,
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table';",
-          ], { encoding: 'utf-8' });
-
-          // Clean up temp file
-          try { rmSync(tmpSql); } catch {}
-
-          dbSpin2.succeed(`Database imported (${(countResult.stdout || '').trim()} tables, admin: ${adminUsername})`);
         } catch (err: any) {
           dbSpin2.fail('Database import failed: ' + err.message);
         }
@@ -687,9 +696,43 @@ ${chalk.bold.green('Clone complete!')}
 }
 
 function checkRsync(): boolean {
+  if (bundledRsync()) return true;
   const cmd = process.platform === 'win32' ? 'where' : 'which';
   const result = spawnSync(cmd, ['rsync'], { stdio: 'ignore' });
   return result.status === 0;
+}
+
+/**
+ * Locate an awk-compatible interpreter. Resolution order:
+ *   1. Bundled BusyBox-w64 in bin/win32/ (Windows only — invoked as `busybox awk`)
+ *   2. `awk` or `gawk` in PATH
+ *   3. Common Git-for-Windows install dirs (Windows only)
+ *
+ * Returns the command path plus any arg-prefix that must precede the awk
+ * arguments (busybox uses `busybox awk -f script input`).
+ */
+function findAwk(): { cmd: string; prefixArgs: string[] } | null {
+  const bb = bundledBusybox();
+  if (bb) return { cmd: bb, prefixArgs: ['awk'] };
+
+  const cmd = process.platform === 'win32' ? 'where' : 'which';
+  for (const name of ['awk', 'gawk']) {
+    const r = spawnSync(cmd, [name], { stdio: 'pipe' });
+    if (r.status === 0) return { cmd: name, prefixArgs: [] };
+  }
+  if (process.platform === 'win32') {
+    const candidates = [
+      'C:\\Program Files\\Git\\usr\\bin\\awk.exe',
+      'C:\\Program Files (x86)\\Git\\usr\\bin\\awk.exe',
+    ];
+    if (process.env.PROGRAMFILES) {
+      candidates.push(process.env.PROGRAMFILES + '\\Git\\usr\\bin\\awk.exe');
+    }
+    for (const c of candidates) {
+      if (existsSync(c)) return { cmd: c, prefixArgs: [] };
+    }
+  }
+  return null;
 }
 
 function sanitizeName(name: string): string {

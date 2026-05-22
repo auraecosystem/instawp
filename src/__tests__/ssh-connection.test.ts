@@ -121,7 +121,7 @@ describe('ssh-connection', () => {
         '--exclude=.git',
         '--exclude=node_modules',
         '--exclude=.DS_Store',
-        '-e', expect.stringContaining('-i /home/user/.instawp/cli_key'),
+        '-e', expect.stringContaining('-i "/home/user/.instawp/cli_key"'),
         './wp-content/',
         'testuser@test.example.com:/home/testuser/web/site.example.com/public_html/wp-content/',
       ]), expect.any(Object));
