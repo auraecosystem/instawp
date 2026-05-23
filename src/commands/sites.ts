@@ -209,6 +209,81 @@ export function registerSitesCommand(program: Command): void {
       }
     });
 
+  // sites creds <site>
+  sites
+    .command('creds <site>')
+    .description('Show WP admin username, password, and Magic Login URL for a site')
+    .action(async (siteIdentifier: string) => {
+      requireAuth();
+
+      const spin = spinner('Resolving site...');
+      spin.start();
+
+      let site;
+      try {
+        site = await resolveSite(siteIdentifier);
+        spin.stop();
+      } catch {
+        spin.fail('Site resolution failed');
+        process.exit(1);
+      }
+
+      const client = getClient();
+      try {
+        const res = await client.get(`/sites/${site.id}/details`);
+        const data = res.data?.data;
+        const siteInfo = data?.site || data;
+        let creds = siteInfo?.site_meta || data?.site_meta || {};
+
+        // Fallback: list endpoint exposes credentials some details responses omit
+        if (!creds.wp_username) {
+          try {
+            const listRes = await client.get('/sites', { params: { per_page: 50 } });
+            const match = (listRes.data?.data || []).find((s: any) => s.id === site.id);
+            if (match?.site_meta?.wp_username) creds = match.site_meta;
+          } catch { /* ignore */ }
+        }
+
+        const siteUrl = siteInfo?.url || '';
+        const adminUrl = siteUrl ? `${siteUrl}/wp-admin` : '';
+        const magicUrl = creds.wp_magic_login_url
+          || (siteInfo?.hash ? `${getApiUrl()}/wordpress-auto-login?site=${siteInfo.hash}` : '');
+
+        if (isJsonMode()) {
+          console.log(JSON.stringify({
+            success: true,
+            data: {
+              site_id: site.id,
+              url: siteUrl,
+              wp_username: creds.wp_username || '',
+              wp_password: creds.wp_password || '',
+              wp_admin_url: adminUrl,
+              magic_login_url: magicUrl,
+            },
+          }));
+          return;
+        }
+
+        if (!creds.wp_username && !magicUrl) {
+          error('No credentials available for this site');
+          info('The site may still be provisioning. Try again in a moment.');
+          process.exit(1);
+        }
+
+        success(`${site.name || site.sub_domain} (ID: ${site.id})`);
+        if (siteUrl) console.log(`\n  ${chalk.dim('Site URL:')}    ${chalk.cyan.underline(siteUrl)}`);
+        if (creds.wp_username) {
+          console.log(`  ${chalk.dim('Username:')}    ${creds.wp_username}`);
+          console.log(`  ${chalk.dim('Password:')}    ${creds.wp_password}`);
+        }
+        if (adminUrl) console.log(`  ${chalk.dim('WP Admin:')}    ${chalk.cyan.underline(adminUrl)}`);
+        if (magicUrl) console.log(`  ${chalk.dim('Magic Login:')} ${chalk.cyan.underline(magicUrl)}`);
+      } catch (err: any) {
+        error('Could not fetch site credentials', err.response?.data?.message || err.message);
+        process.exit(1);
+      }
+    });
+
   // sites php <site>
   sites
     .command('php <site>')

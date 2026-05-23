@@ -57,8 +57,17 @@ export function table(headers: string[], rows: Record<string, any>[]): void {
   console.log(t.toString());
 }
 
+function shouldSuppressSpinner(): boolean {
+  if (jsonMode) return true;
+  if (!process.stdout.isTTY) return true;
+  if (process.env.CI) return true;
+  if (process.env.INSTAWP_QUIET) return true;
+  if (process.env.NO_COLOR) return true;
+  return false;
+}
+
 export function spinner(text: string): Ora | { text: string; start: () => any; succeed: (t?: string) => void; fail: (t?: string) => void; stop: () => void } {
-  if (jsonMode) {
+  if (shouldSuppressSpinner()) {
     return { text: '', start() { return this; }, succeed() {}, fail() {}, stop() {} };
   }
   return ora(text);

@@ -47,15 +47,20 @@ instawp whoami
 
 # Sites (cloud)
 instawp sites list [--status <s>] [--page <n>] [--per-page <n>] [--all]
+instawp sites creds <site>
 instawp create --name <n> [--php <v>] [--config <id>]
 instawp sites delete <site> [--force]
+instawp open <site> [--admin] [--magic] [--print]
 
-# Remote access
-instawp exec <site> <cmd...> [--api] [--timeout <s>]
-instawp wp <site> <args...> [--api]
-instawp ssh <site>
+# Remote access (wp is the primary command; exec is the escape hatch)
+instawp wp <site> <args...> [--api]           # WP-CLI on the site
+instawp ssh <site>                            # Interactive shell
 instawp sync push <site> [--path] [--exclude] [--dry-run]
 instawp sync pull <site> [--path] [--exclude] [--dry-run]
+instawp db push <site> <file> [--force] [--no-backup]
+instawp db pull <site> [--output <path>] [--no-compress]
+instawp logs <site> [--wp] [--php] [--nginx] [--follow] [--lines <n>]
+instawp exec <site> <cmd...> [--api] [--timeout <s>]   # Raw shell (non-WP)
 
 # Teams
 instawp teams list
@@ -77,8 +82,11 @@ All commands support `--json` for machine-readable output.
 
 ## Key Design Decisions
 
-### exec + wp merged (single transport flag)
-- `exec` runs any command; `wp` is sugar that prepends `wp`
+### wp (primary) + exec (escape hatch)
+- **`wp <site>`** is the canonical way to run anything on a remote site — prepends `wp` to args, integrates with WP-CLI.
+- **`exec <site>`** is the escape hatch for non-WP shell commands (`ls`, `tail`, `ps`, …). Same transport, no `wp` prefix.
+- Both accept `--` as a POSIX end-of-options marker so users can forward raw args: `instawp wp my-site -- post list --post_type=page`
+- Both shell-escape each arg via single-quote wrapping before piping to remote stdin — fixes the `eval '...'` parens issue.
 - `--ssh` (default): real SSH connection, proper exit codes, real-time output
 - `--api`: uses `POST /sites/{id}/run-cmd` API → cloud-app → InstaCP `v-instawp-run-cmd`
 - Both transports can run arbitrary commands (API is not WP-only despite the name)

@@ -134,7 +134,7 @@ describe('command registration', () => {
     registerExecCommand(program);
     const cmd = program.commands.find(c => c.name() === 'exec');
     expect(cmd).toBeDefined();
-    expect(cmd!.description()).toContain('command');
+    expect(cmd!.description()).toMatch(/shell|wp/i);
   });
 
   it('registers sync command with push and pull subcommands', async () => {

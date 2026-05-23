@@ -12,6 +12,9 @@ import { registerSshCommand } from './commands/ssh.js';
 import { registerExecCommand, registerWpCommand } from './commands/exec.js';
 import { registerTeamsCommand } from './commands/teams.js';
 import { registerLocalCommand } from './commands/local.js';
+import { registerDbCommand } from './commands/db.js';
+import { registerOpenCommand } from './commands/open.js';
+import { registerLogsCommand } from './commands/logs.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json');
@@ -41,10 +44,13 @@ registerSitesCommand(program);
 registerCreateAlias(program);
 
 // -- Remote access --
-registerExecCommand(program);
 registerWpCommand(program);
+registerExecCommand(program);
 registerSshCommand(program);
 registerSyncCommand(program);
+registerDbCommand(program);
+registerLogsCommand(program);
+registerOpenCommand(program);
 
 // -- Teams --
 registerTeamsCommand(program);
@@ -87,14 +93,18 @@ ${d('Auth')}
 ${d('Sites')}
   ${c('create')}             Create a new WordPress site
   ${c('sites list')}         List all sites
+  ${c('sites creds')}        Show WP admin credentials + Magic Login URL
   ${c('sites php')}          View or update PHP version/settings
   ${c('sites delete')}       Delete a site
+  ${c('open')}   ${d('<site>')}         Open site (or --admin / --magic) in browser
 
 ${d('Remote Access')}
-  ${c('exec')}  ${d('<site>')} ${d('<cmd>')}  Run any command on a site (SSH default, --api)
-  ${c('wp')}    ${d('<site>')} ${d('<args>')} WP-CLI shorthand (exec <site> wp <args>)
-  ${c('ssh')}   ${d('<site>')}          Interactive SSH session
-  ${c('sync')}  ${d('push|pull')}       Sync wp-content via rsync
+  ${c('wp')}     ${d('<site>')} ${d('<args>')} WP-CLI on a remote site (primary)
+  ${c('ssh')}    ${d('<site>')}         Interactive SSH session
+  ${c('sync')}   ${d('push|pull')}      Sync wp-content via rsync
+  ${c('db')}     ${d('push|pull')}      Push/pull MySQL database (auto-backup)
+  ${c('logs')}   ${d('<site>')}         Tail WP / PHP / nginx logs
+  ${c('exec')}   ${d('<site>')} ${d('<cmd>')}  Run arbitrary shell (escape hatch for non-WP)
 
 ${d('Local Development')}
   ${c('local create')}       Create and start a local WordPress site
@@ -116,9 +126,11 @@ ${d('Examples')}
   $ instawp create --name my-site
   $ instawp local create --name blog
   $ instawp wp my-site plugin list
-  $ instawp exec my-site php -v --api
-  $ instawp ssh my-site
-  $ instawp sites list --json
+  $ instawp wp my-site -- post list --post_type=page
+  $ instawp open my-site --admin
+  $ instawp db pull my-site
+  $ instawp logs my-site --follow
+  $ instawp sites creds my-site
 `;
 });
 

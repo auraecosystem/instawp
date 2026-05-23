@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.0.1-beta.5 (2026-05-23)
+
+### New Commands
+- `db push <site> <file>` — Push a local SQL dump (`.sql` or `.sql.gz`) to the remote MySQL database. Always backs up the remote DB to `~/db-backup-{ISO}.sql.gz` first (skip with `--no-backup`). Confirmation prompt unless `--force`. Closes the #1 gap blocking full-site deploys from the CLI.
+- `db pull <site>` — Stream the remote MySQL database to a local gzipped dump. `--output <path>` and `--no-compress` flags.
+- `open <site>` — Open the site URL in the default browser. `--admin` opens `/wp-admin`, `--magic` opens the Magic Login URL, `--print` pipes the URL to stdout instead.
+- `logs <site>` — Tail logs via SSH. `--wp` (default, debug.log), `--php` (PHP-FPM error log), `--nginx` (nginx error log), `--follow` / `-f`, `--lines <n>`. Multiple flags multi-tail. Probes HestiaCP path variations automatically.
+- `sites creds <site>` — Re-fetch WP admin credentials + Magic Login URL for an existing site (previously only available in the `create` output).
+
+### Improvements
+- `wp <site>` is now positioned as the primary remote-access command; `exec` is documented as the escape hatch for non-WP shell commands.
+- `wp` / `exec` accept POSIX `--` to forward raw args verbatim: `instawp wp my-site -- post list --post_type=page`.
+- Spinners are suppressed in non-TTY contexts, CI environments (`CI` env var), `--json` mode, `NO_COLOR`, and `INSTAWP_QUIET` — fixes "Resolving site..." leaking into piped output.
+
+### Bug Fixes
+- `instawp wp <site> eval '...'` no longer breaks on parens, quotes, or other shell metacharacters. Each arg is now POSIX shell-quoted before being piped to the remote shell's stdin (previously `args.join(' ')` left metacharacters unescaped, causing remote `bash: syntax error near unexpected token '('`).
+
+### Docs
+- New `ROADMAP.md` capturing 15 forward-looking improvement areas (multi-site bulk ops, cost transparency, CI/CD deploy command, shell completion, `doctor`, config file, snapshot/migration CLI, self-update, etc.) ranked by ROI.
+- README + CLAUDE.md updated with `wp`-primary positioning and examples for all new commands.
+
 ## 0.0.1-beta.4 (2026-05-22)
 
 ### Windows — Zero-Install Support

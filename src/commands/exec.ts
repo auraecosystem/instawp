@@ -5,8 +5,27 @@ import { ensureSshAccess } from '../lib/ssh-keys.js';
 import { execViaSsh } from '../lib/ssh-connection.js';
 import { error, spinner, isJsonMode } from '../lib/output.js';
 
+// POSIX shell single-quote escape: 'safe' becomes 'safe' (passthrough for
+// shell-safe chars), anything else wrapped in '...' with embedded ' → '\''.
+// Required because the remote shell receives joined args via stdin and would
+// otherwise interpret parens, quotes, semicolons, etc. (broke `wp eval '...'`).
+function shellQuote(arg: string): string {
+  if (arg === '') return "''";
+  if (/^[a-zA-Z0-9_\-./=:@%+,]+$/.test(arg)) return arg;
+  return "'" + arg.replace(/'/g, "'\\''") + "'";
+}
+
+function joinForRemote(args: string[]): string {
+  return args.map(shellQuote).join(' ');
+}
+
 async function execAction(siteIdentifier: string, args: string[], opts: { api?: boolean; timeout?: string }): Promise<void> {
   requireAuth();
+
+  // Drop POSIX `--` end-of-options marker so users can write
+  //   instawp wp <site> -- post list --post_type=page
+  // and have everything after `--` reach WP-CLI verbatim.
+  args = args.filter(a => a !== '--');
 
   if (args.length === 0) {
     error('No command specified. Usage: instawp exec <site> <command...>');
@@ -25,7 +44,7 @@ async function execAction(siteIdentifier: string, args: string[], opts: { api?: 
     process.exit(1);
   }
 
-  const command = args.join(' ');
+  const command = joinForRemote(args);
 
   if (opts.api) {
     await execViaApi(site, command, opts);
@@ -108,11 +127,17 @@ async function execViaSshTransport(site: any, command: string): Promise<void> {
 export function registerExecCommand(program: Command): void {
   program
     .command('exec <site> [args...]')
-    .description('Run a command on a remote site (SSH by default, or --api)')
+    .description('Escape hatch: run arbitrary shell on a remote site (SSH default, or --api). For WP-CLI use `wp` instead.')
     .passThroughOptions()
     .allowUnknownOption()
     .option('--api', 'Use API transport instead of SSH')
     .option('--timeout <seconds>', 'Command timeout in seconds (API mode only)', '30')
+    .addHelpText('after', `
+Examples:
+  $ instawp exec my-site ls -la
+  $ instawp exec my-site -- ps aux | grep php   # use -- to forward raw args
+  $ instawp exec my-site php -v --api
+`)
     .action(async (siteIdentifier: string, args: string[], opts) => {
       // passThroughOptions may swallow --api/--timeout into args — extract them
       const extractedApi = args.includes('--api');
@@ -132,11 +157,20 @@ export function registerExecCommand(program: Command): void {
 export function registerWpCommand(program: Command): void {
   program
     .command('wp <site> [args...]')
-    .description('Run WP-CLI commands on a remote site (shorthand for exec <site> wp ...)')
+    .description('Run WP-CLI on a remote site (the primary remote-access command)')
     .passThroughOptions()
     .allowUnknownOption()
     .option('--api', 'Use API transport instead of SSH')
     .option('--timeout <seconds>', 'Command timeout in seconds (API mode only)', '30')
+    .addHelpText('after', `
+Examples:
+  $ instawp wp my-site plugin list
+  $ instawp wp my-site theme activate twentytwentyfour
+  $ instawp wp my-site -- post list --post_type=page    # use -- to pass raw WP-CLI args
+  $ instawp wp my-site eval '\\\\MyClass::init(["force" => true]);'
+
+Tip: wrap PHP/eval payloads in single quotes — args are shell-escaped automatically before being sent to the remote shell.
+`)
     .action(async (siteIdentifier: string, args: string[], opts) => {
       // passThroughOptions may swallow --api/--timeout into args — extract them
       const extractedApi = args.includes('--api');
