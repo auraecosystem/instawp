@@ -6,7 +6,47 @@ on:
       - 'v*'
 
 jobs:
+  smoke-windows:
+    name: Windows bundle smoke test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Pack
+        run: npm pack
+        shell: bash
+
+      - name: Install packed tarball globally
+        run: npm i -g $(ls instawp-cli-*.tgz)
+        shell: bash
+
+      - name: Verify bundled rsync.exe loads (DLL chain integrity)
+        shell: pwsh
+        run: |
+          $cliRoot = "$env:APPDATA\npm\node_modules\@instawp\cli"
+          $rsync = Join-Path $cliRoot "bin\win32\rsync.exe"
+          $busybox = Join-Path $cliRoot "bin\win32\busybox.exe"
+          if (-not (Test-Path $rsync)) { throw "rsync.exe not found at $rsync" }
+          if (-not (Test-Path $busybox)) { throw "busybox.exe not found at $busybox" }
+          Write-Host "--- rsync --version ---"
+          & $rsync --version
+          if ($LASTEXITCODE -ne 0) { throw "rsync.exe failed to execute (exit $LASTEXITCODE). DLL chain is broken." }
+          Write-Host "--- busybox awk --help ---"
+          & $busybox awk --help 2>&1 | Select-Object -First 5
+          if ($LASTEXITCODE -ne 0) { throw "busybox.exe awk failed (exit $LASTEXITCODE)" }
+          Write-Host "--- instawp --version ---"
+          instawp --version
+
   publish:
+    name: Publish to npm
+    needs: smoke-windows
     runs-on: ubuntu-latest
     permissions:
       contents: read

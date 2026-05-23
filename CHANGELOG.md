@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.1-beta.6 (2026-05-23)
+
+### Bug Fixes (Windows)
+- Bundled `rsync.exe` now actually loads. beta.4/beta.5 shipped with `msys-2.0.dll` from the legacy `msys2-runtime-3.3` fork, which is missing the `fallocate` symbol that rsync 3.4 needs — produced `Entry Point Not Found: fallocate` on launch and exit code `3221225785` (`STATUS_DLL_INIT_FAILED`) when invoked indirectly via `sync push/pull` or `local clone`.
+- Rebuilt the Windows bundle against current MSYS2 packages: `msys2-runtime-3.6.9-1`, `libopenssl-3.6.2-1`, `libiconv-1.19-1`, `libxxhash-0.8.3-1`, `libzstd-1.5.7-1`, `popt-1.19-1`, `libintl-0.22.5-1`. Includes `msys-popt-0.dll` and `msys-intl-8.dll` which the newer rsync now requires.
+- Upgraded bundled rsync from 3.4.0 → 3.4.2-2.
+
+### Internals
+- `scripts/fetch-windows-binaries.sh` now verifies DLL closure (every referenced `msys-*.dll` is present) and asserts `fallocate` is exported from `msys-2.0.dll` before declaring the bundle valid. Catches "wrong runtime fork" regressions at build time.
+- Added `smoke-windows` job to the publish workflow — runs on `windows-latest` and actually executes the bundled `rsync.exe` and `busybox.exe` before npm publish. Publish is now gated on this passing.
+
 ## 0.0.1-beta.5 (2026-05-23)
 
 ### New Commands
