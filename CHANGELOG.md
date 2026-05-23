@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.1-beta.8 (2026-05-23)
+
+### Bug Fixes (Windows)
+- Moved bundled Windows binaries from `bin/win32/` to `vendor/win32/`. With `bin/` and the `bin` field in package.json both set, npm's global install on Windows dropped the `bin/win32/` subdirectory — leaving the CLI unable to find rsync.exe at runtime. macOS/Linux installs were unaffected. Renaming sidesteps the collision entirely.
+
 ## 0.0.1-beta.7 (2026-05-23)
 
 ### Internals

@@ -5,10 +5,15 @@ import { resolveFromModule } from './paths.js';
 /**
  * Path to the bundled Windows binaries directory, resolved relative to this
  * module's location at runtime. After build, this module lives in
- * `dist/lib/windows-binaries.js`, so `../../bin/win32` lands at
- * `<package-root>/bin/win32`.
+ * `dist/lib/windows-binaries.js`, so `../../vendor/win32` lands at
+ * `<package-root>/vendor/win32`.
+ *
+ * NOTE: directory is named `vendor/win32` (not `bin/win32`) deliberately —
+ * npm's handling of the `bin` field interacts badly with a same-named `bin/`
+ * directory on Windows during global install (the subdir gets dropped),
+ * so we keep our bundled tools out of the conventional `bin/` slot.
  */
-const WIN_BIN_DIR = resolveFromModule(import.meta.url, '..', '..', 'bin', 'win32');
+const WIN_BIN_DIR = resolveFromModule(import.meta.url, '..', '..', 'vendor', 'win32');
 
 function bundled(name: string): string | null {
   if (process.platform !== 'win32') return null;

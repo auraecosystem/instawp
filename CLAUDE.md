@@ -153,8 +153,8 @@ All commands support `--json` for machine-readable output.
 Windows ships with `ssh`/`scp` but not `rsync`, `awk`, or `sqlite3`. The CLI works on Windows with zero extra installs via:
 
 - **`better-sqlite3`** (npm dep) — replaces the sqlite3 CLI. Native module, prebuilt binaries for win32-x64.
-- **`bin/win32/busybox.exe`** — provides `awk` for the `mysql2sqlite` script (invoked as `busybox awk -f ...`).
-- **`bin/win32/rsync.exe`** + `msys-*.dll` — used for sync/push/pull. The DLLs must remain colocated with rsync.exe.
+- **`vendor/win32/busybox.exe`** — provides `awk` for the `mysql2sqlite` script (invoked as `busybox awk -f ...`).
+- **`vendor/win32/rsync.exe`** + `msys-*.dll` — used for sync/push/pull. The DLLs must remain colocated with rsync.exe.
 
 ### Resolution order
 - `findAwk()` / `bundledRsync()` (`src/lib/windows-binaries.ts`) prefer bundled binaries on Windows, then fall back to system PATH, then check common Git-for-Windows install dirs.
@@ -164,9 +164,9 @@ Windows ships with `ssh`/`scp` but not `rsync`, `awk`, or `sqlite3`. The CLI wor
 ```bash
 # Maintainer-only — run on macOS/Linux with curl + 7z (`brew install p7zip`)
 bash scripts/fetch-windows-binaries.sh
-git add bin/win32 && git commit -m 'chore: refresh Windows binaries'
+git add vendor/win32 && git commit -m 'chore: refresh Windows binaries'
 ```
-See `bin/win32/NOTICE.md` for sources and license obligations (BusyBox is GPL-2.0, rsync is GPL-3.0).
+See `vendor/win32/NOTICE.md` for sources and license obligations (BusyBox is GPL-2.0, rsync is GPL-3.0).
 
 ### Cross-platform path handling
 - `src/lib/paths.ts` → `toRsyncPath()` converts `C:\foo\bar` → `/c/foo/bar` so msys rsync doesn't interpret `C:` as a hostname.

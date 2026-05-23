@@ -1,6 +1,6 @@
 {
   "name": "@instawp/cli",
-  "version": "0.0.1-beta.7",
+  "version": "0.0.1-beta.8",
   "description": "InstaWP CLI - Create and manage WordPress sites from the terminal",
   "type": "module",
   "bin": {
@@ -10,7 +10,7 @@
     "dist",
     "!dist/__tests__",
     "scripts/mysql2sqlite",
-    "bin/win32/**",
+    "vendor/win32/**",
     "CHANGELOG.md"
   ],
   "scripts": {

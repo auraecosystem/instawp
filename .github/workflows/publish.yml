@@ -25,14 +25,14 @@ jobs:
       - name: List bundle in workspace (sanity)
         shell: pwsh
         run: |
-          Write-Host "--- contents of bin\win32 in workspace ---"
-          Get-ChildItem -Force "bin\win32" | Format-Table Name, Length -AutoSize
+          Write-Host "--- contents of vendor/win32 in workspace ---"
+          Get-ChildItem -Force "vendor/win32" | Format-Table Name, Length -AutoSize
 
       - name: Run bundled binaries directly from workspace (no npm install needed)
         shell: pwsh
         run: |
-          $rsync = "$env:GITHUB_WORKSPACE\bin\win32\rsync.exe"
-          $busybox = "$env:GITHUB_WORKSPACE\bin\win32\busybox.exe"
+          $rsync = "$env:GITHUB_WORKSPACE\vendor\win32\rsync.exe"
+          $busybox = "$env:GITHUB_WORKSPACE\vendor\win32\busybox.exe"
           if (-not (Test-Path $rsync)) { throw "rsync.exe not in workspace bundle" }
           if (-not (Test-Path $busybox)) { throw "busybox.exe not in workspace bundle" }
 
@@ -65,14 +65,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "npm i -g failed" }
 
           $cliRoot = "$env:APPDATA\npm\node_modules\@instawp\cli"
-          $rsync = Join-Path $cliRoot "bin\win32\rsync.exe"
-          $busybox = Join-Path $cliRoot "bin\win32\busybox.exe"
+          $rsync = Join-Path $cliRoot "vendor\win32\rsync.exe"
+          $busybox = Join-Path $cliRoot "vendor\win32\busybox.exe"
 
           Write-Host "--- installed bundle dir listing ---"
-          if (Test-Path "$cliRoot\bin\win32") {
-            Get-ChildItem -Force "$cliRoot\bin\win32" | Format-Table Name, Length -AutoSize
+          if (Test-Path "$cliRoot\vendor\win32") {
+            Get-ChildItem -Force "$cliRoot\vendor\win32" | Format-Table Name, Length -AutoSize
           } else {
-            Write-Host "WARNING: $cliRoot\bin\win32 not present"
+            Write-Host "WARNING: $cliRoot\vendor\win32 not present"
           }
 
           if (-not (Test-Path $rsync)) { throw "rsync.exe missing from installed package — likely AV quarantine. See listing above." }

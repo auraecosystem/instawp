@@ -19,7 +19,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN_DIR="$REPO_ROOT/bin/win32"
+BIN_DIR="$REPO_ROOT/vendor/win32"
 MSYS_BASE="https://repo.msys2.org/msys/x86_64"
 
 # Pinned versions (update by browsing the MSYS2 index).
@@ -120,4 +120,4 @@ ls -lh "$BIN_DIR"
 echo
 echo "Total size: $(du -sh "$BIN_DIR" | cut -f1)"
 echo
-echo "Next: git add bin/win32 && git commit -m 'chore: refresh Windows binaries'"
+echo "Next: git add vendor/win32 && git commit -m 'chore: refresh Windows binaries'"
