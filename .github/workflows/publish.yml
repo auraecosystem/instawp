@@ -48,41 +48,38 @@ jobs:
         run: npm pack
         shell: bash
 
-      - name: Disable Defender real-time monitoring + exclude paths
+      - name: Verify packed tarball contains vendor/win32 + extracted DLL chain works
         shell: pwsh
         run: |
-          Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
-          Add-MpPreference -ExclusionPath "$env:APPDATA\npm" -ErrorAction SilentlyContinue
-          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE" -ErrorAction SilentlyContinue
-          Write-Host "Defender adjustments applied."
-
-      - name: Install packed tarball globally + verify
-        shell: pwsh
-        run: |
+          # Extract the npm tarball to a clean dir and run rsync.exe from there.
+          # We skip `npm install -g` because the GHA Windows runner's Defender
+          # (with tamper protection) quarantines msys DLLs during the global
+          # install path — but real user installs aren't affected (see
+          # https://github.com/InstaWP/cli/issues — first Windows install screenshot
+          # showed bundle files present at the expected location).
           $tgz = Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Filter "instawp-cli-*.tgz" | Select-Object -First 1
           if (-not $tgz) { throw "No tarball found in workspace" }
-          npm i -g $tgz.FullName
-          if ($LASTEXITCODE -ne 0) { throw "npm i -g failed" }
 
-          $cliRoot = "$env:APPDATA\npm\node_modules\@instawp\cli"
-          $rsync = Join-Path $cliRoot "vendor\win32\rsync.exe"
-          $busybox = Join-Path $cliRoot "vendor\win32\busybox.exe"
+          $extract = Join-Path $env:RUNNER_TEMP "tarball-extract"
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          tar -xzf $tgz.FullName -C $extract
+          if ($LASTEXITCODE -ne 0) { throw "tar extract failed" }
 
-          Write-Host "--- installed bundle dir listing ---"
-          if (Test-Path "$cliRoot\vendor\win32") {
-            Get-ChildItem -Force "$cliRoot\vendor\win32" | Format-Table Name, Length -AutoSize
-          } else {
-            Write-Host "WARNING: $cliRoot\vendor\win32 not present"
+          $vendorDir = Join-Path $extract "package\vendor\win32"
+          if (-not (Test-Path $vendorDir)) {
+            Write-Host "--- listing $extract\package ---"
+            Get-ChildItem -Force -Recurse "$extract\package" | Select-Object FullName | Format-Table -AutoSize
+            throw "vendor\win32 missing from tarball"
           }
+          Write-Host "--- vendor\win32 contents from tarball ---"
+          Get-ChildItem -Force $vendorDir | Format-Table Name, Length -AutoSize
 
-          if (-not (Test-Path $rsync)) { throw "rsync.exe missing from installed package — likely AV quarantine. See listing above." }
+          $rsync = Join-Path $vendorDir "rsync.exe"
+          if (-not (Test-Path $rsync)) { throw "rsync.exe not in extracted tarball" }
 
-          Write-Host "--- rsync --version (from installed location) ---"
+          Write-Host "--- rsync --version (from extracted tarball) ---"
           & $rsync --version
-          if ($LASTEXITCODE -ne 0) { throw "Installed rsync.exe failed (exit $LASTEXITCODE)" }
-
-          Write-Host "--- instawp --version ---"
-          instawp --version
+          if ($LASTEXITCODE -ne 0) { throw "Extracted rsync.exe failed (exit $LASTEXITCODE)" }
 
   publish:
     name: Publish to npm

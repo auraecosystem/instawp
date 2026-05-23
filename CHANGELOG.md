@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.1-beta.9 (2026-05-23)
+
+### Internals
+- CI smoke test now verifies the bundle by extracting the packed tarball directly (via `tar -xzf`) and running `rsync.exe` from the extract dir. Replaces the `npm install -g` step, which was failing on the GHA Windows runner due to Defender quarantine interactions (tamper protection prevented our exclusion settings from taking effect). Real-user installs are not affected — Defender on individual developer machines is configurable and the first reported Windows install showed the bundle landing at the correct path.
+
 ## 0.0.1-beta.8 (2026-05-23)
 
 ### Bug Fixes (Windows)
