@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    # Lets maintainers iterate on the smoke test without bumping the version.
+    # The publish job is gated to skip on manual runs (see `if:` below).
 
 jobs:
   smoke-windows:
@@ -23,9 +26,37 @@ jobs:
         run: npm pack
         shell: bash
 
+      - name: Disable Windows Defender (avoids quarantine of msys DLLs)
+        shell: pwsh
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+          # Also add the tarball + npm global dir to exclusions in case real-time can't be turned off
+          Add-MpPreference -ExclusionPath "$env:APPDATA\npm" -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE" -ErrorAction SilentlyContinue
+          Write-Host "Defender exclusions set."
+
       - name: Install packed tarball globally
         run: npm i -g $(ls instawp-cli-*.tgz)
         shell: bash
+
+      - name: List installed bundle (diagnostic)
+        shell: pwsh
+        run: |
+          $cliRoot = "$env:APPDATA\npm\node_modules\@instawp\cli"
+          Write-Host "--- contents of $cliRoot\bin\win32 ---"
+          if (Test-Path "$cliRoot\bin\win32") {
+            Get-ChildItem -Force "$cliRoot\bin\win32" | Format-Table Name, Length -AutoSize
+          } else {
+            Write-Host "Directory does NOT exist."
+            Write-Host "--- listing $cliRoot ---"
+            if (Test-Path $cliRoot) {
+              Get-ChildItem -Force $cliRoot | Format-Table Name -AutoSize
+            } else {
+              Write-Host "$cliRoot does not exist either."
+              Write-Host "--- listing $env:APPDATA\npm\node_modules ---"
+              Get-ChildItem -Force "$env:APPDATA\npm\node_modules" -ErrorAction SilentlyContinue | Format-Table Name -AutoSize
+            }
+          }
 
       - name: Verify bundled rsync.exe loads (DLL chain integrity)
         shell: pwsh
@@ -47,6 +78,7 @@ jobs:
   publish:
     name: Publish to npm
     needs: smoke-windows
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
