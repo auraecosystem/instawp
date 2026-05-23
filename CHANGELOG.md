@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.1-beta.7 (2026-05-23)
+
+### Internals
+- Smoke-windows CI job now runs the bundled `rsync.exe` and `busybox.exe` directly from the workspace bundle **before** the npm-install step, so a passing smoke test proves the DLL chain is correct independent of whether antivirus interferes with the global install path.
+- Adds Windows Defender exclusions before `npm i -g` to prevent msys DLLs from being quarantined during install.
+- Publish job now skips on `workflow_dispatch` (manual triggers), so maintainers can re-test the smoke job without bumping the version.
+
 ## 0.0.1-beta.6 (2026-05-23)
 
 ### Bug Fixes (Windows)
