@@ -22,56 +22,65 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+      - name: List bundle in workspace (sanity)
+        shell: pwsh
+        run: |
+          Write-Host "--- contents of bin\win32 in workspace ---"
+          Get-ChildItem -Force "bin\win32" | Format-Table Name, Length -AutoSize
+
+      - name: Run bundled binaries directly from workspace (no npm install needed)
+        shell: pwsh
+        run: |
+          $rsync = "$env:GITHUB_WORKSPACE\bin\win32\rsync.exe"
+          $busybox = "$env:GITHUB_WORKSPACE\bin\win32\busybox.exe"
+          if (-not (Test-Path $rsync)) { throw "rsync.exe not in workspace bundle" }
+          if (-not (Test-Path $busybox)) { throw "busybox.exe not in workspace bundle" }
+
+          Write-Host "--- rsync --version ---"
+          & $rsync --version
+          if ($LASTEXITCODE -ne 0) { throw "rsync.exe failed to execute (exit $LASTEXITCODE). DLL chain is broken." }
+
+          Write-Host "--- busybox awk version ---"
+          & $busybox awk 'BEGIN { print "awk works" }'
+          if ($LASTEXITCODE -ne 0) { throw "busybox awk failed (exit $LASTEXITCODE)" }
+
       - name: Pack
         run: npm pack
         shell: bash
 
-      - name: Disable Windows Defender (avoids quarantine of msys DLLs)
+      - name: Disable Defender real-time monitoring + exclude paths
         shell: pwsh
         run: |
           Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
-          # Also add the tarball + npm global dir to exclusions in case real-time can't be turned off
           Add-MpPreference -ExclusionPath "$env:APPDATA\npm" -ErrorAction SilentlyContinue
           Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE" -ErrorAction SilentlyContinue
-          Write-Host "Defender exclusions set."
+          Write-Host "Defender adjustments applied."
 
-      - name: Install packed tarball globally
-        run: npm i -g $(ls instawp-cli-*.tgz)
-        shell: bash
-
-      - name: List installed bundle (diagnostic)
+      - name: Install packed tarball globally + verify
         shell: pwsh
         run: |
-          $cliRoot = "$env:APPDATA\npm\node_modules\@instawp\cli"
-          Write-Host "--- contents of $cliRoot\bin\win32 ---"
-          if (Test-Path "$cliRoot\bin\win32") {
-            Get-ChildItem -Force "$cliRoot\bin\win32" | Format-Table Name, Length -AutoSize
-          } else {
-            Write-Host "Directory does NOT exist."
-            Write-Host "--- listing $cliRoot ---"
-            if (Test-Path $cliRoot) {
-              Get-ChildItem -Force $cliRoot | Format-Table Name -AutoSize
-            } else {
-              Write-Host "$cliRoot does not exist either."
-              Write-Host "--- listing $env:APPDATA\npm\node_modules ---"
-              Get-ChildItem -Force "$env:APPDATA\npm\node_modules" -ErrorAction SilentlyContinue | Format-Table Name -AutoSize
-            }
-          }
+          $tgz = Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Filter "instawp-cli-*.tgz" | Select-Object -First 1
+          if (-not $tgz) { throw "No tarball found in workspace" }
+          npm i -g $tgz.FullName
+          if ($LASTEXITCODE -ne 0) { throw "npm i -g failed" }
 
-      - name: Verify bundled rsync.exe loads (DLL chain integrity)
-        shell: pwsh
-        run: |
           $cliRoot = "$env:APPDATA\npm\node_modules\@instawp\cli"
           $rsync = Join-Path $cliRoot "bin\win32\rsync.exe"
           $busybox = Join-Path $cliRoot "bin\win32\busybox.exe"
-          if (-not (Test-Path $rsync)) { throw "rsync.exe not found at $rsync" }
-          if (-not (Test-Path $busybox)) { throw "busybox.exe not found at $busybox" }
-          Write-Host "--- rsync --version ---"
+
+          Write-Host "--- installed bundle dir listing ---"
+          if (Test-Path "$cliRoot\bin\win32") {
+            Get-ChildItem -Force "$cliRoot\bin\win32" | Format-Table Name, Length -AutoSize
+          } else {
+            Write-Host "WARNING: $cliRoot\bin\win32 not present"
+          }
+
+          if (-not (Test-Path $rsync)) { throw "rsync.exe missing from installed package — likely AV quarantine. See listing above." }
+
+          Write-Host "--- rsync --version (from installed location) ---"
           & $rsync --version
-          if ($LASTEXITCODE -ne 0) { throw "rsync.exe failed to execute (exit $LASTEXITCODE). DLL chain is broken." }
-          Write-Host "--- busybox awk --help ---"
-          & $busybox awk --help 2>&1 | Select-Object -First 5
-          if ($LASTEXITCODE -ne 0) { throw "busybox.exe awk failed (exit $LASTEXITCODE)" }
+          if ($LASTEXITCODE -ne 0) { throw "Installed rsync.exe failed (exit $LASTEXITCODE)" }
+
           Write-Host "--- instawp --version ---"
           instawp --version
 
