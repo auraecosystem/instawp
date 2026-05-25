@@ -246,7 +246,8 @@ export function registerLocalCommand(program: Command): void {
         spin.start();
         try {
           const client = getClient();
-          const res = await client.post('/sites', { site_name: localName });
+          // Default to a reserved (permanent) site, consistent with `instawp create`.
+          const res = await client.post('/sites', { site_name: localName, is_reserved: true });
           site = res.data?.data;
           if (!site?.id) throw new Error('Unexpected API response');
           spin.succeed(`Cloud site created (ID: ${site.id})`);
