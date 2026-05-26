@@ -46,25 +46,19 @@ jobs:
           & $busybox awk 'BEGIN { print "awk works" }'
           if ($LASTEXITCODE -ne 0) { throw "busybox awk failed (exit $LASTEXITCODE)" }
 
-      - name: Install globally + verify CLI and native/SFTP deps load
+      - name: Install globally + verify CLI loads (incl. SFTP + native deps)
         shell: pwsh
         run: |
           npm i -g (Get-ChildItem -Filter "instawp-cli-*.tgz").FullName
           if ($LASTEXITCODE -ne 0) { throw "npm i -g failed" }
 
-          Write-Host "--- instawp --version ---"
+          # `instawp --version` eagerly loads the full command import graph:
+          #   sync -> ssh-connection -> sftp-sync -> ssh2-sftp-client + ssh2
+          #   local -> better-sqlite3 (native)
+          # so a clean exit here proves all of those load on Windows.
+          Write-Host "--- instawp --version (exercises SFTP + native deps) ---"
           instawp --version
-          if ($LASTEXITCODE -ne 0) { throw "instawp --version failed (exit $LASTEXITCODE)" }
-
-          # Resolve deps from inside the installed CLI dir — npm global installs
-          # hoist deps to the top-level node_modules, so require by bare name with
-          # cwd at the package resolves correctly regardless of hoisting.
-          $cliRoot = "$env:APPDATA\npm\node_modules\@instawp\cli"
-          Push-Location $cliRoot
-          node -e "require('ssh2-sftp-client'); require('better-sqlite3'); console.log('deps OK: ssh2-sftp-client + better-sqlite3')"
-          $depExit = $LASTEXITCODE
-          Pop-Location
-          if ($depExit -ne 0) { throw "dependency load failed (exit $depExit)" }
+          if ($LASTEXITCODE -ne 0) { throw "instawp --version failed (exit $LASTEXITCODE) — a dependency failed to load" }
 
   publish:
     name: Publish to npm
