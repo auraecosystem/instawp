@@ -27,24 +27,21 @@ describe('windows-binaries', () => {
   it('returns null on non-Windows regardless of file presence', async () => {
     mockPlatform('darwin');
     mockExists.mockReturnValue(true);
-    const { bundledRsync, bundledBusybox } = await import('../lib/windows-binaries.js');
-    expect(bundledRsync()).toBeNull();
+    const { bundledBusybox } = await import('../lib/windows-binaries.js');
     expect(bundledBusybox()).toBeNull();
   });
 
-  it('returns null on Windows when binaries are absent', async () => {
+  it('returns null on Windows when busybox is absent', async () => {
     mockPlatform('win32');
     mockExists.mockReturnValue(false);
-    const { bundledRsync, bundledBusybox } = await import('../lib/windows-binaries.js');
-    expect(bundledRsync()).toBeNull();
+    const { bundledBusybox } = await import('../lib/windows-binaries.js');
     expect(bundledBusybox()).toBeNull();
   });
 
-  it('returns the path on Windows when binaries are present', async () => {
+  it('returns the path on Windows when busybox is present', async () => {
     mockPlatform('win32');
     mockExists.mockReturnValue(true);
-    const { bundledRsync, bundledBusybox } = await import('../lib/windows-binaries.js');
-    expect(bundledRsync()).toMatch(/rsync\.exe$/);
+    const { bundledBusybox } = await import('../lib/windows-binaries.js');
     expect(bundledBusybox()).toMatch(/busybox\.exe$/);
   });
 });

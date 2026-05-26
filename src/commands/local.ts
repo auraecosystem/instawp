@@ -6,7 +6,7 @@ import chalk from 'chalk';
 import open from 'open';
 import Database from 'better-sqlite3';
 import { resolveFromModule } from '../lib/paths.js';
-import { bundledBusybox, bundledRsync } from '../lib/windows-binaries.js';
+import { bundledBusybox } from '../lib/windows-binaries.js';
 import {
   getLocalInstances,
   getLocalInstance,
@@ -28,7 +28,7 @@ import {
 import { requireAuth, getClient } from '../lib/api.js';
 import { resolveSite } from '../lib/site-resolver.js';
 import { ensureSshAccess } from '../lib/ssh-keys.js';
-import { rsyncViaSsh, execViaSsh, execViaSshToFile } from '../lib/ssh-connection.js';
+import { syncFiles, execViaSsh, execViaSshToFile } from '../lib/ssh-connection.js';
 import { success, error, table, spinner, info, isJsonMode } from '../lib/output.js';
 import type { LocalInstance } from '../types.js';
 
@@ -233,7 +233,7 @@ export function registerLocalCommand(program: Command): void {
       }
 
       if (!checkRsync()) {
-        error('rsync is required.' + (process.platform === 'win32' ? ' Reinstall the CLI — the bundled rsync.exe is missing.' : ' Install: brew install rsync'));
+        error('rsync is required for sync on macOS/Linux. Install: brew install rsync (macOS) or your distro package.');
         process.exit(1);
       }
 
@@ -316,7 +316,7 @@ export function registerLocalCommand(program: Command): void {
       info(`Pushing ${chalk.dim(localWpContent)} -> ${chalk.dim(conn.host + ':' + remotePath)}`);
       if (opts.dryRun) info('(dry run)');
 
-      const exitCode = rsyncViaSsh(conn, localWpContent, remoteTarget, extraArgs, !!opts.dryRun, true);
+      const exitCode = await syncFiles(conn, localWpContent, remoteTarget, extraArgs, !!opts.dryRun, true);
 
       if (exitCode === 0) {
         success('Push complete!');
@@ -346,7 +346,7 @@ export function registerLocalCommand(program: Command): void {
       }
 
       if (!checkRsync()) {
-        error('rsync is required.' + (process.platform === 'win32' ? ' Reinstall the CLI — the bundled rsync.exe is missing.' : ' Install: brew install rsync'));
+        error('rsync is required for sync on macOS/Linux. Install: brew install rsync (macOS) or your distro package.');
         process.exit(1);
       }
 
@@ -387,7 +387,7 @@ export function registerLocalCommand(program: Command): void {
       info(`Pulling ${chalk.dim(conn.host + ':' + remotePath)} -> ${chalk.dim(localWpContent)}`);
       if (opts.dryRun) info('(dry run)');
 
-      const exitCode = rsyncViaSsh(conn, remoteSource, localWpContent, extraArgs, !!opts.dryRun, true);
+      const exitCode = await syncFiles(conn, remoteSource, localWpContent, extraArgs, !!opts.dryRun, true);
 
       if (exitCode === 0) {
         success('Pull complete! Restart the local site to see changes.');
@@ -409,7 +409,7 @@ export function registerLocalCommand(program: Command): void {
       requireAuth();
 
       if (!checkRsync()) {
-        error('rsync is required.' + (process.platform === 'win32' ? ' Reinstall the CLI — the bundled rsync.exe is missing.' : ' Install: brew install rsync'));
+        error('rsync is required for sync on macOS/Linux. Install: brew install rsync (macOS) or your distro package.');
         process.exit(1);
       }
 
@@ -492,7 +492,7 @@ export function registerLocalCommand(program: Command): void {
           includeArgs.push(`--include=${pattern}`);
         }
       }
-      const rsyncExit = rsyncViaSsh(conn, remoteSource, localWpContent, [
+      const rsyncExit = await syncFiles(conn, remoteSource, localWpContent, [
         ...includeArgs,
         '--exclude=cache',
         '--exclude=upgrade',
@@ -501,13 +501,13 @@ export function registerLocalCommand(program: Command): void {
       ], false, true);
 
       if (rsyncExit !== 0) {
-        error(`wp-content sync failed (rsync exit code ${rsyncExit})`);
+        error(`wp-content sync failed (exit code ${rsyncExit})`);
       }
 
       // 5b. Pull non-core root files (CLAUDE.md, .htaccess, wp-cli.yml, etc.)
       const remoteRoot = `/home/${conn.username}/web/${conn.domain}/public_html/`;
       const rootRemote = `${conn.username}@${conn.host}:${remoteRoot}`;
-      rsyncViaSsh(conn, rootRemote, dir + '/', [
+      await syncFiles(conn, rootRemote, dir + '/', [
         '--exclude=wp-admin/',
         '--exclude=wp-includes/',
         '--exclude=wp-content/',
@@ -697,9 +697,9 @@ ${chalk.bold.green('Clone complete!')}
 }
 
 function checkRsync(): boolean {
-  if (bundledRsync()) return true;
-  const cmd = process.platform === 'win32' ? 'where' : 'which';
-  const result = spawnSync(cmd, ['rsync'], { stdio: 'ignore' });
+  // Windows transfers go over pure-JS SFTP, so rsync isn't required there.
+  if (process.platform === 'win32') return true;
+  const result = spawnSync('which', ['rsync'], { stdio: 'ignore' });
   return result.status === 0;
 }
 

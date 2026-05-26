@@ -3,14 +3,13 @@ import { spawnSync } from 'node:child_process';
 import { requireAuth } from '../lib/api.js';
 import { resolveSite } from '../lib/site-resolver.js';
 import { ensureSshAccess } from '../lib/ssh-keys.js';
-import { rsyncViaSsh } from '../lib/ssh-connection.js';
-import { bundledRsync } from '../lib/windows-binaries.js';
+import { syncFiles } from '../lib/ssh-connection.js';
 import { success, error, spinner, info } from '../lib/output.js';
 
 function checkRsync(): boolean {
-  if (bundledRsync()) return true;
-  const cmd = process.platform === 'win32' ? 'where' : 'which';
-  const result = spawnSync(cmd, ['rsync'], { stdio: 'ignore' });
+  // Windows transfers go over pure-JS SFTP, so rsync isn't required there.
+  if (process.platform === 'win32') return true;
+  const result = spawnSync('which', ['rsync'], { stdio: 'ignore' });
   return result.status === 0;
 }
 
@@ -79,7 +78,7 @@ export function registerSyncCommand(program: Command): void {
       info(`Pushing ${localPath} -> ${conn.host}:${remotePath}`);
       if (opts.dryRun) info('(dry run)');
 
-      const exitCode = rsyncViaSsh(conn, localPath, remoteTarget, extraArgs, !!opts.dryRun, true);
+      const exitCode = await syncFiles(conn, localPath, remoteTarget, extraArgs, !!opts.dryRun, true);
 
       if (exitCode === 0) {
         success('Push complete');
@@ -138,7 +137,7 @@ export function registerSyncCommand(program: Command): void {
       info(`Pulling ${conn.host}:${remotePath} -> ${localPath}`);
       if (opts.dryRun) info('(dry run)');
 
-      const exitCode = rsyncViaSsh(conn, remoteSource, localPath, extraArgs, !!opts.dryRun, true);
+      const exitCode = await syncFiles(conn, remoteSource, localPath, extraArgs, !!opts.dryRun, true);
 
       if (exitCode === 0) {
         success('Pull complete');

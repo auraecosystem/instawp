@@ -1,12 +1,11 @@
-# Bundled Windows binaries
+# Bundled Windows binary
 
-Files in this directory are third-party binaries bundled into the npm package
-so that `instawp local clone`, `instawp local push/pull`, and `instawp sync`
-work on Windows without requiring users to install rsync, awk, or sqlite3.
+`busybox.exe` is bundled into the npm package so that `instawp local clone`
+works on Windows without requiring the user to install `awk`.
 
-Populate this directory by running `scripts/fetch-windows-binaries.sh`.
+Populate/refresh it with `scripts/fetch-windows-binaries.sh`.
 
-## Components and licenses
+## Component and license
 
 ### busybox.exe
 - **Source**: BusyBox-w64 by Ron Yorston — https://frippery.org/busybox/
@@ -14,25 +13,19 @@ Populate this directory by running `scripts/fetch-windows-binaries.sh`.
 - **Used for**: provides `awk` (invoked as `busybox.exe awk -f ...`) for
   converting MySQL dumps to SQLite via the vendored `scripts/mysql2sqlite`
   awk script.
+- Statically linked; no external DLL dependencies.
 
-### rsync.exe + msys-*.dll
-- **Source**: Git for Windows portable distribution — https://gitforwindows.org/
-- **License**: rsync is GPL-3.0; msys2-runtime DLLs are mixed (mostly LGPL/MIT)
-- **Used for**: file sync between local and remote sites in `sync push/pull`
-  and `local push/pull/clone`.
+## Why no rsync here
 
-The `msys-2.0.dll` and other `msys-*.dll` files must remain colocated with
-rsync.exe — rsync.exe links against them at runtime.
+Earlier betas bundled `rsync.exe` + the msys2 runtime DLLs for file sync.
+That was removed: msys rsync cannot drive native Windows OpenSSH (incompatible
+pipe/signal semantics → "connection unexpectedly closed"). Windows file
+transfers now use a pure-JS SFTP client (`src/lib/sftp-sync.ts`) instead, which
+needs no native binaries.
 
 ## License compliance
 
-The CLI is MIT-licensed, but the bundled GPL binaries impose obligations on
-**redistribution**:
-
-- Users who receive the binaries are entitled to the corresponding source.
-- BusyBox source: https://busybox.net/downloads/
-- rsync source: https://download.samba.org/pub/rsync/src/
-- Git for Windows source: https://github.com/git-for-windows/git
-
-The maintainer's responsibility is to keep this NOTICE.md shipped alongside
-the binaries in the npm tarball.
+BusyBox is GPL-2.0. Recipients of the binary are entitled to its source:
+https://busybox.net/downloads/ (and the busybox-w32 port at
+https://frippery.org/busybox/). Keep this NOTICE.md shipped alongside the
+binary in the npm tarball.

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { existsSync, mkdirSync, openSync, closeSync } from 'node:fs';
 import type { SshConnection } from '../types.js';
 import { toRsyncPath } from './paths.js';
-import { bundledRsync } from './windows-binaries.js';
+import { syncViaSftp } from './sftp-sync.js';
 
 const KNOWN_HOSTS = path.join(homedir(), '.instawp', 'known_hosts');
 
@@ -107,7 +107,8 @@ export function rsyncViaSsh(
     toRsyncPath(dest),
   ];
 
-  const result = spawnSync(bundledRsync() ?? 'rsync', args, {
+  // rsyncViaSsh only runs on macOS/Linux now (Windows uses syncViaSftp).
+  const result = spawnSync('rsync', args, {
     stdio: stream ? 'inherit' : ['pipe', 'pipe', 'pipe'],
     encoding: stream ? undefined : 'utf-8',
   });
@@ -120,4 +121,68 @@ export function rsyncViaSsh(
   }
 
   return result.status ?? 1;
+}
+
+/** Strip a `user@host:` prefix, returning the remote path (or null if not remote). */
+function parseRemoteSpec(spec: string, conn: SshConnection): string | null {
+  const prefix = `${conn.username}@${conn.host}:`;
+  if (spec.startsWith(prefix)) return spec.slice(prefix.length);
+  const m = spec.match(/^[^@/\\]+@[^:]+:(.*)$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Transfer files between local and remote. On macOS/Linux this shells out to
+ * rsync (delta sync). On Windows it uses a pure-JS SFTP client instead —
+ * the bundled msys rsync.exe cannot drive native Windows OpenSSH (incompatible
+ * pipe/signal semantics → "connection unexpectedly closed"), so rsync-over-ssh
+ * is unusable there. Same call shape as rsyncViaSsh; one of source/dest is a
+ * `user@host:path` spec.
+ */
+export async function syncFiles(
+  conn: SshConnection,
+  source: string,
+  dest: string,
+  extraArgs: string[],
+  dryRun: boolean,
+  stream: boolean,
+): Promise<number> {
+  if (process.platform !== 'win32') {
+    return rsyncViaSsh(conn, source, dest, extraArgs, dryRun, stream);
+  }
+
+  const destRemote = parseRemoteSpec(dest, conn);
+  const sourceRemote = parseRemoteSpec(source, conn);
+  let direction: 'push' | 'pull';
+  let localPath: string;
+  let remotePath: string;
+  if (destRemote !== null) {
+    direction = 'push'; localPath = source; remotePath = destRemote;
+  } else if (sourceRemote !== null) {
+    direction = 'pull'; localPath = dest; remotePath = sourceRemote;
+  } else {
+    console.error('syncFiles: could not determine remote endpoint from source/dest');
+    return 1;
+  }
+
+  // rsyncViaSsh hardcodes these defaults; mirror them for SFTP.
+  const excludes = ['.git', 'node_modules', '.DS_Store'];
+  const includes: string[] = [];
+  for (const a of extraArgs) {
+    if (a.startsWith('--exclude=')) excludes.push(a.slice('--exclude='.length));
+    else if (a.startsWith('--include=')) includes.push(a.slice('--include='.length));
+  }
+
+  return syncViaSftp(conn, {
+    direction,
+    localPath,
+    remotePath,
+    excludes,
+    includes,
+    dryRun,
+    onItem: (action, rel) => {
+      if (action === 'error') console.error(rel);
+      else if (rel) console.log(`  ${action === 'sent' ? '↑' : '↓'} ${rel}`);
+    },
+  });
 }

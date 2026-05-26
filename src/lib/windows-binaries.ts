@@ -22,16 +22,13 @@ function bundled(name: string): string | null {
 }
 
 /**
- * Absolute path to a bundled rsync.exe (with its msys DLLs alongside),
- * or null if not bundled / not on Windows.
- */
-export function bundledRsync(): string | null {
-  return bundled('rsync.exe');
-}
-
-/**
  * Absolute path to a bundled BusyBox-w64 executable, which provides `awk`
  * via `busybox.exe awk -f script input`. Returns null off-Windows.
+ *
+ * Note: we no longer bundle rsync.exe — Windows file transfers use a pure-JS
+ * SFTP client (see lib/sftp-sync.ts) because msys rsync can't drive native
+ * Windows OpenSSH. busybox is the only bundled binary, used by `local clone`'s
+ * mysql2sqlite step.
  */
 export function bundledBusybox(): string | null {
   return bundled('busybox.exe');

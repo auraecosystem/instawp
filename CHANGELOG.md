@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.0.1-beta.10 (2026-05-26)
+
+### Fixed — Windows file sync now works
+- `instawp sync push/pull`, `local push/pull`, and `local clone` failed on Windows with `rsync: connection unexpectedly closed (0 bytes)` + `sigpacket: Suppressing signal 30 to win32 process`. Root cause: the bundled **msys2 rsync.exe couldn't drive native Windows OpenSSH** (incompatible pipe/signal semantics). The DLL "entry point" fix in beta.6 got rsync.exe to *load*, but the SSH transport still died instantly.
+- **Fix**: Windows now transfers files over a **pure-JS SFTP client** (`ssh2-sftp-client`) instead of rsync-over-ssh. macOS/Linux are unchanged (still rsync, with delta sync). New `syncFiles()` dispatcher picks the transport per-platform.
+
+### Changed
+- **Removed `rsync.exe` + all msys2 runtime DLLs from the bundle** (~11 MB). The Windows bundle is now just `busybox.exe` (660 KB, statically linked, for the `mysql2sqlite` awk step in `local clone`). Total package shrinks accordingly.
+- SFTP transfer honors the same exclude/include patterns as the rsync paths (`.git`, `node_modules`, `cache`, `backup*`, etc.).
+
+### Trade-off
+- SFTP does full-file copy (no rsync delta algorithm). Fine for typical wp-content; repeat syncs of large sites are slower than rsync on macOS/Linux. We chose this over bundling an msys ssh (which would have dragged in the ~3.5 MB Heimdal/Kerberos DLL chain).
+
 ## 0.0.1-beta.9 (2026-05-23)
 
 ### Internals

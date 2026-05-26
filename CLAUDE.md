@@ -153,24 +153,29 @@ All commands support `--json` for machine-readable output.
 Windows ships with `ssh`/`scp` but not `rsync`, `awk`, or `sqlite3`. The CLI works on Windows with zero extra installs via:
 
 - **`better-sqlite3`** (npm dep) — replaces the sqlite3 CLI. Native module, prebuilt binaries for win32-x64.
-- **`vendor/win32/busybox.exe`** — provides `awk` for the `mysql2sqlite` script (invoked as `busybox awk -f ...`).
-- **`vendor/win32/rsync.exe`** + `msys-*.dll` — used for sync/push/pull. The DLLs must remain colocated with rsync.exe.
+- **`vendor/win32/busybox.exe`** — provides `awk` for the `mysql2sqlite` script (invoked as `busybox awk -f ...`). Statically linked, no DLLs. This is the **only** bundled binary.
+- **Pure-JS SFTP** (`ssh2-sftp-client`) for file transfers — see below.
 
-### Resolution order
-- `findAwk()` / `bundledRsync()` (`src/lib/windows-binaries.ts`) prefer bundled binaries on Windows, then fall back to system PATH, then check common Git-for-Windows install dirs.
-- On macOS/Linux, the bundle is ignored — `rsync`/`awk` come from PATH.
+### File transfer: rsync (mac/Linux) vs SFTP (Windows)
+- `syncFiles()` in `src/lib/ssh-connection.ts` is the dispatcher. On macOS/Linux it shells out to `rsync` (delta sync). On Windows it calls `syncViaSftp()` (`src/lib/sftp-sync.ts`).
+- **Why not bundle rsync on Windows?** We tried (betas 4–9). msys2 rsync.exe cannot drive **native Windows OpenSSH** — incompatible pipe/signal semantics produce `connection unexpectedly closed (0 bytes)` + `sigpacket: Suppressing signal 30`. Bundling an msys ssh too would drag in the whole Heimdal/Kerberos DLL chain (~3.5 MB, ~15 brittle DLLs). Pure-JS SFTP sidesteps all of it.
+- **Trade-off**: SFTP does full-file copy (no rsync delta). Fine for wp-content; slower on large repeat syncs.
+- `syncViaSftp` mirrors rsync's exclude/include patterns via `makeMatcher` (exact names match at any depth; `*` globs don't cross `/`; patterns with `/` are anchored to the relative path).
+
+### Resolution order (busybox)
+- `findAwk()` (`src/commands/local.ts`) prefers bundled `busybox.exe` on Windows, then `awk`/`gawk` in PATH, then common Git-for-Windows dirs.
+- `bundledBusybox()` (`src/lib/windows-binaries.ts`) returns the path only on win32 when the file exists.
 
 ### Refreshing the Windows bundle
 ```bash
-# Maintainer-only — run on macOS/Linux with curl + 7z (`brew install p7zip`)
+# Maintainer-only — just downloads busybox64u.exe (requires curl)
 bash scripts/fetch-windows-binaries.sh
-git add vendor/win32 && git commit -m 'chore: refresh Windows binaries'
+git add vendor/win32 && git commit -m 'chore: refresh busybox'
 ```
-See `vendor/win32/NOTICE.md` for sources and license obligations (BusyBox is GPL-2.0, rsync is GPL-3.0).
+See `vendor/win32/NOTICE.md` for source + license (BusyBox is GPL-2.0).
 
-### Cross-platform path handling
-- `src/lib/paths.ts` → `toRsyncPath()` converts `C:\foo\bar` → `/c/foo/bar` so msys rsync doesn't interpret `C:` as a hostname.
-- `rsyncViaSsh()` applies `toRsyncPath` centrally; the embedded `-e "ssh -i ... -o ..."` string uses forward slashes + quotes so msys/cygwin sh parses key paths correctly.
+### Cross-platform path handling (rsync path, mac/Linux only)
+- `src/lib/paths.ts` → `toRsyncPath()` converts `C:\foo\bar` → `/c/foo/bar`. Retained for completeness, but only exercised by `rsyncViaSsh` which no longer runs on Windows.
 
 ## Known Limitations
 
