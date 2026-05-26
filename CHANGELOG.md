@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.1-beta.11 (2026-05-26)
+
+### Improved — parallel SFTP transfers on Windows
+- Windows file sync now transfers files across a **pool of parallel SSH connections** instead of one-at-a-time. Measured ~2.9× speedup (a 238-file wp-content pull dropped from ~369s to ~129s).
+- Concurrency defaults to 4, configurable via `INSTAWP_SFTP_CONCURRENCY` (capped at 8).
+- Two-phase design: a single control connection walks the tree and pre-creates directories, then files transfer in parallel. Per-file errors are collected and reported without aborting the whole sync.
+
 ## 0.0.1-beta.10 (2026-05-26)
 
 ### Fixed — Windows file sync now works
