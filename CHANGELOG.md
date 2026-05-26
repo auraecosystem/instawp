@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.1-beta.12 (2026-05-26)
+
+### Fixed — `local create/start/clone` on Windows (`spawn npx ENOENT`)
+- WordPress Playground launch failed on Windows with `spawn npx ENOENT`. On Windows `npx`/`wp-playground-cli` are `.cmd` shims, and Node refuses to spawn `.cmd` without `shell: true` (since the CVE-2024-27980 fix) — so the bare `spawn('npx', …)` failed.
+- **Fix**: route the Playground spawns through `cross-spawn`, which resolves `.cmd` shims and quotes arguments (e.g. `--mount` paths with spaces) safely. macOS/Linux behavior is unchanged.
+
 ## 0.0.1-beta.11 (2026-05-26)
 
 ### Improved — parallel SFTP transfers on Windows

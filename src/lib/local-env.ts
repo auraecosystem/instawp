@@ -1,4 +1,8 @@
-import { spawn, execSync, spawnSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
+// cross-spawn handles Windows quirks: `npx`/`wp-playground-cli` are `.cmd`
+// shims, and Node won't spawn .cmd without shell:true (CVE-2024-27980). It also
+// quotes args (e.g. mount paths) safely, which shell:true does not.
+import spawn from 'cross-spawn';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
