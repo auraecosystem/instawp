@@ -10,6 +10,29 @@ async function fetchSiteById(client: any, id: string | number): Promise<SiteDeta
   return normalizeSite(site, data);
 }
 
+/**
+ * Fetch all sites by walking pagination. Uses a conservative per_page (20) and
+ * follows meta.last_page rather than relying on a single large page — robust
+ * for accounts with many sites and resilient to the API returning fewer rows
+ * than requested for large per_page values (see issue #3). Mirrors how
+ * `sites list` paginates.
+ */
+async function fetchAllSites(client: any): Promise<any[]> {
+  const PER_PAGE = 20;
+  const MAX_PAGES = 100; // safety cap (~2000 sites); resolve by ID beyond that
+  const all: any[] = [];
+  let page = 1;
+  while (page <= MAX_PAGES) {
+    const res = await client.get('/sites', { params: { per_page: PER_PAGE, page } });
+    const items: any[] = res.data?.data || [];
+    all.push(...items);
+    const lastPage = Number(res.data?.meta?.last_page) || page;
+    if (page >= lastPage || items.length === 0) break;
+    page++;
+  }
+  return all;
+}
+
 export async function resolveSite(identifier: string): Promise<SiteDetails> {
   const client = getClient();
 
@@ -38,10 +61,9 @@ export async function resolveSite(identifier: string): Promise<SiteDetails> {
     }
   }
 
-  // Search by name/domain
+  // Search by name/domain — paginate through all sites
   try {
-    const res = await client.get('/sites', { params: { per_page: 100 } });
-    const sites: any[] = res.data?.data || [];
+    const sites: any[] = await fetchAllSites(client);
 
     const needle = identifier.toLowerCase();
     const matches = sites.filter((s: any) => {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.1-beta.13 (2026-05-28)
+
+### Fixed — `wp` / `exec` site resolution (issue #3)
+- `instawp wp <site>` / `instawp exec <site>` could fail to resolve a site by name with "No site found" (or, on older builds, hang at "Resolving site…") on accounts where the `/sites` list didn't return the site in a single `per_page=100` page.
+- **Fix**: `resolveSite` now paginates the `/sites` endpoint (`per_page=20`, walking `meta.last_page`) instead of relying on one large page. This is robust for accounts with 100+ sites and resilient to environments where the API returns fewer rows than requested for large `per_page` values. Matches how `sites list` paginates.
+
 ## 0.0.1-beta.12 (2026-05-26)
 
 ### Fixed — `local create/start/clone` on Windows (`spawn npx ENOENT`)

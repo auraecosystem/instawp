@@ -80,9 +80,35 @@ describe('site-resolver', () => {
         .mockResolvedValueOnce({ data: { data: { site: { id: 2, name: 'beta', sub_domain: 'beta.example.com', url: '', status: 0, wp_version: '', php_version: '' } } } }); // GET /sites/2/details
 
       const result = await resolveSite('Beta');
-      expect(mockGet).toHaveBeenCalledWith('/sites', { params: { per_page: 100 } });
+      expect(mockGet).toHaveBeenCalledWith('/sites', { params: { per_page: 20, page: 1 } });
       expect(result.id).toBe(2);
       expect(result.name).toBe('beta');
+    });
+
+    it('paginates across pages to find a site beyond page 1 (issue #3)', async () => {
+      // Page 1: 20 sites that do NOT match; meta says last_page 2.
+      const page1 = {
+        data: {
+          data: Array.from({ length: 20 }, (_, i) => ({ id: 100 + i, name: `filler-${i}`, sub_domain: `filler-${i}.example.com` })),
+          meta: { last_page: 2, per_page: 20 },
+        },
+      };
+      // Page 2: contains the target.
+      const page2 = {
+        data: {
+          data: [{ id: 999, name: 'needle', sub_domain: 'needle.example.com', url: 'https://needle.example.com' }],
+          meta: { last_page: 2, per_page: 20 },
+        },
+      };
+      mockGet
+        .mockResolvedValueOnce(page1) // GET /sites?page=1
+        .mockResolvedValueOnce(page2) // GET /sites?page=2
+        .mockResolvedValueOnce({ data: { data: { site: { id: 999, name: 'needle', sub_domain: 'needle.example.com', url: '', status: 0, wp_version: '', php_version: '' } } } }); // details
+
+      const result = await resolveSite('needle');
+      expect(mockGet).toHaveBeenNthCalledWith(1, '/sites', { params: { per_page: 20, page: 1 } });
+      expect(mockGet).toHaveBeenNthCalledWith(2, '/sites', { params: { per_page: 20, page: 2 } });
+      expect(result.id).toBe(999);
     });
 
     it('matches by sub_domain', async () => {
