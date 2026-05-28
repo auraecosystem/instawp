@@ -66,7 +66,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write   # create GitHub Releases
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -84,3 +84,22 @@ jobs:
         run: npm publish --access public --tag beta
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release from CHANGELOG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Extract just this version's section from CHANGELOG.md. Match the
+          # header exactly ("## <version> ") so beta.1 doesn't match beta.14.
+          NOTES=$(awk -v hdr="## ${VERSION} " '
+            index($0, hdr) == 1 { flag = 1; next }
+            /^## / && flag { exit }
+            flag { print }
+          ' CHANGELOG.md)
+          if [ -z "$NOTES" ]; then NOTES="See CHANGELOG.md for details."; fi
+          printf '%s\n' "$NOTES" | gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file - \
+            --prerelease \
+            --verify-tag
