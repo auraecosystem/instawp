@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.1-beta.14 (2026-05-28)
+
+### Improved — clearer first-run for `local` commands
+- When `local create/start/clone` falls back to `npx` (no global `wp-playground-cli`), the CLI now prints a one-time dim hint explaining the first-run download (~30s) and how to skip it on future runs (`npm i -g @wp-playground/cli`). Previously users just saw npm's raw download output with no context. Shown once per run, on stderr, and suppressed in `--json` mode.
+
 ## 0.0.1-beta.13 (2026-05-28)
 
 ### Fixed — `wp` / `exec` site resolution (issue #3)

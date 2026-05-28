@@ -7,23 +7,41 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, 
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import net from 'node:net';
+import chalk from 'chalk';
+import { isJsonMode } from './output.js';
 import type { LocalInstance } from '../types.js';
 
 const LOCAL_BASE_DIR = join(homedir(), '.instawp', 'local');
 const DEFAULT_PORT_START = 9400;
 
 /**
- * Returns [command, prefixArgs] for running wp-playground-cli.
- * Prefers the global binary (faster) over npx (slower).
+ * Returns [command, prefixArgs, usingNpx] for running wp-playground-cli.
+ * Prefers the global binary (faster) over npx (slower, downloads on first run).
  */
-function getPlaygroundCommand(): [string, string[]] {
+export function getPlaygroundCommand(): [string, string[], boolean] {
   // Check for globally installed binary first (0.7s vs 1.4s npx overhead)
   const cmd = process.platform === 'win32' ? 'where' : 'which';
   const result = spawnSync(cmd, ['wp-playground-cli'], { stdio: 'pipe' });
   if (result.status === 0) {
-    return ['wp-playground-cli', []];
+    return ['wp-playground-cli', [], false];
   }
-  return ['npx', ['--yes', '@wp-playground/cli']];
+  return ['npx', ['--yes', '@wp-playground/cli'], true];
+}
+
+let npxHintShown = false;
+/** Test-only: reset the once-per-process hint guard. */
+export function _resetNpxHint(): void { npxHintShown = false; }
+/**
+ * One-time, dim hint shown when falling back to npx (no global binary). Explains
+ * the first-run download and how to skip it. Suppressed in --json mode.
+ */
+export function maybeShowNpxHint(usingNpx: boolean): void {
+  if (!usingNpx || npxHintShown || isJsonMode()) return;
+  npxHintShown = true;
+  process.stderr.write(
+    chalk.dim('# WordPress Playground not found globally — using npx (downloads once, may take ~30s).\n') +
+    chalk.dim('# Tip: npm i -g @wp-playground/cli  to skip this on future runs.\n'),
+  );
 }
 
 export function getLocalBaseDir(): string {
@@ -202,7 +220,8 @@ export function startServer(
 ): Promise<number> {
   const args = buildServerArgs(instance, opts?.blueprint);
 
-  const [cmd, prefixArgs] = getPlaygroundCommand();
+  const [cmd, prefixArgs, usingNpx] = getPlaygroundCommand();
+  maybeShowNpxHint(usingNpx);
 
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, [...prefixArgs, ...args], {
@@ -258,7 +277,8 @@ export async function startServerBackground(
   blueprint?: string,
 ): Promise<{ pid: number; url: string }> {
   const args = buildServerArgs(instance, blueprint);
-  const [cmd, prefixArgs] = getPlaygroundCommand();
+  const [cmd, prefixArgs, usingNpx] = getPlaygroundCommand();
+  maybeShowNpxHint(usingNpx);
 
   const logFile = join(instance.path, 'server.log');
   const pidFile = join(instance.path, 'server.pid');
