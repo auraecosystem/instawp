@@ -1,24 +1,28 @@
 name: Release Notification
 
+# Posts a Claude-generated release summary to Slack when a new version is
+# published. The CLI releases by pushing a `v*` tag (see publish.yml), so —
+# unlike the other repos, which deploy on PR-merge-to-main — this fires on the
+# tag. Release notes come from the matching CHANGELOG section plus the commits
+# since the previous `v*` tag. The GitHub Release itself is created by
+# publish.yml; this step is the team-facing Slack notification.
+
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - main
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
-      pr_number:
-        description: 'PR number to use for context (for testing)'
+      tag:
+        description: 'Tag to notify for (e.g. v0.0.1-beta.17). Defaults to the latest v* tag.'
         required: false
         default: ''
 
 jobs:
   release-notify:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: read
+      contents: read
       id-token: write
 
     steps:
@@ -28,83 +32,99 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Resolve PR context
-        id: pr
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Resolve release context
+        id: release
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            PR_NUM="${{ inputs.pr_number }}"
-            if [ -z "$PR_NUM" ]; then
-              PR_NUM=$(gh pr list --state merged --base main --limit 1 --json number --jq '.[0].number')
+            TAG="${{ inputs.tag }}"
+            if [ -z "$TAG" ]; then
+              TAG=$(git tag -l 'v*' --sort=-creatordate | head -n1)
             fi
-            PR_JSON=$(gh pr view "$PR_NUM" --json number,title,author,url)
-            echo "number=$(echo "$PR_JSON" | jq -r '.number')" >> "$GITHUB_OUTPUT"
-            echo "title=$(echo "$PR_JSON" | jq -r '.title')" >> "$GITHUB_OUTPUT"
-            echo "author=$(echo "$PR_JSON" | jq -r '.author.login')" >> "$GITHUB_OUTPUT"
-            echo "url=$(echo "$PR_JSON" | jq -r '.url')" >> "$GITHUB_OUTPUT"
           else
-            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
-            echo "title=${{ github.event.pull_request.title }}" >> "$GITHUB_OUTPUT"
-            echo "author=${{ github.event.pull_request.user.login }}" >> "$GITHUB_OUTPUT"
-            echo "url=${{ github.event.pull_request.html_url }}" >> "$GITHUB_OUTPUT"
+            TAG="${GITHUB_REF_NAME}"
           fi
+          if [ -z "$TAG" ]; then
+            echo "::error::No tag to notify for."
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          TAG_SHA=$(git rev-list -n1 "$TAG")
+          AUTHOR=$(git log -1 --format='%an' "$TAG_SHA")
+          RELEASE_URL="${{ github.server_url }}/${{ github.repository }}/releases/tag/${TAG}"
 
-      - name: Get commits since last notification
-        id: commits
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "author=$AUTHOR" >> "$GITHUB_OUTPUT"
+          echo "url=$RELEASE_URL" >> "$GITHUB_OUTPUT"
+          echo "Resolved release: $TAG (version $VERSION) by $AUTHOR"
+
+      - name: Gather release notes + commits
+        id: notes
         run: |
-          LAST_TAG=$(git tag -l 'release-notify/*' --sort=-creatordate | head -n1)
-          if [ -z "$LAST_TAG" ]; then
-            echo "No previous release-notify tag found, using merge commit only"
-            MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
-            if [ -n "$MERGE_SHA" ]; then
-              COMMIT_LOG=$(git log --oneline --no-merges "${MERGE_SHA}^..${MERGE_SHA}")
-              DIFF_STATS=$(git diff --stat "${MERGE_SHA}^" "${MERGE_SHA}" 2>/dev/null || echo "Unable to get diff stats")
-            else
-              COMMIT_LOG=$(git log --oneline --no-merges -1)
-              DIFF_STATS=$(git diff --stat HEAD~1 HEAD 2>/dev/null || echo "Unable to get diff stats")
-            fi
+          TAG="${{ steps.release.outputs.tag }}"
+          VERSION="${{ steps.release.outputs.version }}"
+
+          # Previous v* tag (newest first by creation date, excluding this one).
+          PREV_TAG=$(git tag -l 'v*' --sort=-creatordate | grep -vxF "$TAG" | head -n1)
+          echo "Previous tag: ${PREV_TAG:-<none>}"
+
+          if [ -n "$PREV_TAG" ]; then
+            COMMIT_LOG=$(git log --oneline --no-merges "${PREV_TAG}..${TAG}")
+            DIFF_STATS=$(git diff --stat "$PREV_TAG" "$TAG" 2>/dev/null || echo "")
           else
-            echo "Last release-notify tag: $LAST_TAG"
-            COMMIT_LOG=$(git log --oneline --no-merges "${LAST_TAG}..HEAD")
-            DIFF_STATS=$(git diff --stat "${LAST_TAG}..HEAD")
+            # First release: bound the history so we don't dump the whole repo.
+            COMMIT_LOG=$(git log --oneline --no-merges -20 "$TAG")
+            DIFF_STATS=""
           fi
 
-          COMMIT_COUNT=$(echo "$COMMIT_LOG" | grep -c . || true)
+          COMMIT_COUNT=$(printf '%s\n' "$COMMIT_LOG" | grep -c . || true)
           echo "commit_count=${COMMIT_COUNT}" >> "$GITHUB_OUTPUT"
+
+          # This version's CHANGELOG section (authoritative release notes).
+          # Match the header exactly ("## <version> ") so beta.1 != beta.14.
+          CHANGELOG_SECTION=$(awk -v hdr="## ${VERSION} " '
+            index($0, hdr) == 1 { flag = 1; next }
+            /^## / && flag { exit }
+            flag { print }
+          ' CHANGELOG.md)
 
           {
             echo "commit_log<<COMMITS_EOF"
             echo "$COMMIT_LOG"
             echo "COMMITS_EOF"
           } >> "$GITHUB_OUTPUT"
-
           {
             echo "diff_stats<<DIFF_EOF"
             echo "$DIFF_STATS"
             echo "DIFF_EOF"
           } >> "$GITHUB_OUTPUT"
+          {
+            echo "changelog_section<<CL_EOF"
+            echo "$CHANGELOG_SECTION"
+            echo "CL_EOF"
+          } >> "$GITHUB_OUTPUT"
 
-          echo "Found $COMMIT_COUNT commits since last notification"
+          echo "Found $COMMIT_COUNT commits since ${PREV_TAG:-start}"
 
       - name: Claude Analysis
-        if: steps.commits.outputs.commit_count != '0'
+        if: steps.notes.outputs.commit_count != '0'
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            You are analyzing a production release for the cli repository (TypeScript CLI tool for InstaWP — command-line interface for managing WordPress sites, servers, and deployments on the InstaWP platform).
+            You are analyzing a published release of the cli repository (the InstaWP CLI — a TypeScript command-line tool published to npm as @instawp/cli, for managing WordPress sites, servers, snapshots/versions, and local development from the terminal).
 
-            A PR was just merged to production:
-            - PR: #${{ steps.pr.outputs.number }} - ${{ steps.pr.outputs.title }}
-            - Author: ${{ steps.pr.outputs.author }}
+            Version ${{ steps.release.outputs.version }} (tag ${{ steps.release.outputs.tag }}) was just published to npm.
 
-            Commits since last notification:
-            ${{ steps.commits.outputs.commit_log }}
+            CHANGELOG entry for this version (authoritative — prefer this):
+            ${{ steps.notes.outputs.changelog_section }}
+
+            Commits since the previous release:
+            ${{ steps.notes.outputs.commit_log }}
 
             File change statistics:
-            ${{ steps.commits.outputs.diff_stats }}
+            ${{ steps.notes.outputs.diff_stats }}
 
             Analyze these changes and output ONLY a valid JSON object (no markdown fences, no explanation, no other text) with exactly these fields:
 
@@ -120,14 +140,14 @@ jobs:
 
       - name: Post to Slack
         id: slack
-        if: steps.commits.outputs.commit_count != '0'
+        if: steps.notes.outputs.commit_count != '0'
         env:
           SLACK_WEBHOOK: ${{ secrets.RELEASE_SLACK_WEBHOOK }}
           CLAUDE_ACTION_OUTPUT: ${{ steps.claude.outputs.result }}
-          PR_URL: ${{ steps.pr.outputs.url }}
-          PR_TITLE: ${{ steps.pr.outputs.title }}
-          PR_AUTHOR: ${{ steps.pr.outputs.author }}
-          COMMIT_COUNT: ${{ steps.commits.outputs.commit_count }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_AUTHOR: ${{ steps.release.outputs.author }}
+          COMMIT_COUNT: ${{ steps.notes.outputs.commit_count }}
         run: |
           # Extract Claude's JSON response using python3 for robust parsing
           EXEC_FILE="/home/runner/work/_temp/claude-execution-output.json"
@@ -291,9 +311,9 @@ jobs:
             --arg repo "cli" \
             --arg summary "$SUMMARY" \
             --arg risk "$RISK_EMOJI $RISK_LEVEL" \
-            --arg pr_url "$PR_URL" \
-            --arg pr_title "$PR_TITLE" \
-            --arg pr_author "$PR_AUTHOR" \
+            --arg release_url "$RELEASE_URL" \
+            --arg release_tag "$RELEASE_TAG" \
+            --arg release_author "$RELEASE_AUTHOR" \
             --arg commits "$COMMIT_COUNT" \
             --arg support "$SUPPORT_NOTES" \
             --arg changelog "$CHANGELOG" \
@@ -303,13 +323,13 @@ jobs:
               blocks: ([
                 {
                   type: "header",
-                  text: { type: "plain_text", text: "\($repo) — Release Deployed", emoji: true }
+                  text: { type: "plain_text", text: "\($repo) — Release Published", emoji: true }
                 },
                 {
                   type: "section",
                   fields: [
-                    { type: "mrkdwn", text: "*PR:* <\($pr_url)|\($pr_title)>" },
-                    { type: "mrkdwn", text: "*Author:* \($pr_author)" },
+                    { type: "mrkdwn", text: "*Release:* <\($release_url)|\($release_tag)>" },
+                    { type: "mrkdwn", text: "*Author:* \($release_author)" },
                     { type: "mrkdwn", text: "*Commits:* \($commits)" },
                     { type: "mrkdwn", text: "*Risk:* \($risk)" }
                   ]
@@ -353,15 +373,3 @@ jobs:
             echo "notified=false" >> "$GITHUB_OUTPUT"
             exit 1
           fi
-
-      - name: Create release-notify tag
-        if: steps.slack.outputs.notified == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="release-notify/$(date -u '+%Y-%m-%d-%H%M%S')"
-          SHA=$(git rev-parse HEAD)
-          gh api repos/${{ github.repository }}/git/refs \
-            -f ref="refs/tags/$TAG" \
-            -f sha="$SHA"
-          echo "Created tag: $TAG"
