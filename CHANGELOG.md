@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.1-beta.16 (2026-06-02)
+
+### Changed — renamed `snapshot` → `versions`
+- The command added in beta.15 is now **`instawp versions create|list|restore|delete`** (alias `version`). Renamed from `snapshot` to avoid confusion with InstaWP's separate **Snapshots** product — these are a site's restorable **versions**. Same flags and behavior; only the command name changed.
+
 ## 0.0.1-beta.15 (2026-06-01)
 
 ### Added — `snapshot` command (restorable site versions)

@@ -5,15 +5,18 @@ import { resolveSite } from '../lib/site-resolver.js';
 import { success, error, table, spinner, info, isJsonMode } from '../lib/output.js';
 
 /**
- * Snapshots = InstaWP "site versions": restorable point-in-time copies of a
- * site's files + database. Unlike backups, a snapshot can be rolled back to
- * in-place. The intended workflow (and the reason this exists for the AI era):
- * take a snapshot BEFORE letting an agent run a batch of changes, then roll
- * back the one change that broke it — in one command.
+ * Site versions: restorable point-in-time copies of a site's files + database.
+ * Unlike backups, a version can be rolled back to in-place. The intended
+ * workflow (and the reason this exists for the AI era): create a version
+ * BEFORE letting an agent run a batch of changes, then roll back the one
+ * change that broke it — in one command.
+ *
+ * Named `versions` (not "snapshot") to avoid confusion with InstaWP's separate
+ * "Snapshots" product.
  */
 
 const POLL_INTERVAL = 3000; // 3s
-const MAX_WAIT = 10 * 60 * 1000; // 10 min — snapshots/restores scale with site size
+const MAX_WAIT = 10 * 60 * 1000; // 10 min — create/restore scale with site size
 
 /** Poll a CloudTask until it completes, errors, or times out. */
 async function pollTask(
@@ -59,18 +62,18 @@ function formatDate(value?: string): string {
   return d.toISOString().slice(0, 16).replace('T', ' ');
 }
 
-export function registerSnapshotsCommand(program: Command): void {
-  const snapshots = program
-    .command('snapshot')
-    .aliases(['snapshots'])
-    .description('Manage site snapshots (restorable versions) — snapshot before risky changes, roll back in one command');
+export function registerVersionsCommand(program: Command): void {
+  const versionsCmd = program
+    .command('versions')
+    .aliases(['version'])
+    .description('Manage site versions (restorable point-in-time copies) — create one before risky changes, roll back in one command');
 
-  // snapshot create <site>
-  snapshots
+  // versions create <site>
+  versionsCmd
     .command('create <site>')
-    .description('Create a snapshot of a site (a restorable point-in-time copy)')
-    .option('--name <name>', 'Label for the snapshot (max 25 chars), e.g. "before plugin update"')
-    .option('--no-wait', 'Return immediately instead of waiting for the snapshot to finish')
+    .description('Create a version of a site (a restorable point-in-time copy)')
+    .option('--name <name>', 'Label for the version (max 25 chars), e.g. "before plugin update"')
+    .option('--no-wait', 'Return immediately instead of waiting for the version to finish')
     .action(async (siteIdentifier: string, opts) => {
       requireAuth();
       const client = getClient();
@@ -87,7 +90,7 @@ export function registerSnapshotsCommand(program: Command): void {
       }
       const label = site.name || site.sub_domain || String(site.id);
 
-      const spin = spinner(`Starting snapshot of ${label}...`);
+      const spin = spinner(`Creating version of ${label}...`);
       spin.start();
 
       let versionId: number | undefined;
@@ -99,23 +102,23 @@ export function registerSnapshotsCommand(program: Command): void {
         spin.stop();
 
         if (!versionId) {
-          error('Snapshot creation failed', res.data?.message || res.data);
+          error('Version creation failed', res.data?.message || res.data);
           process.exit(1);
         }
       } catch (err: any) {
-        spin.fail('Failed to create snapshot');
-        error('Could not create snapshot', err.response?.data?.message || err.message);
+        spin.fail('Failed to create version');
+        error('Could not create version', err.response?.data?.message || err.message);
         process.exit(1);
       }
 
       // Optional name — the create endpoint doesn't accept one, so set it via
       // update. The server caps names at 25 chars (longer → 422), so truncate.
-      const snapshotName = opts.name ? String(opts.name).slice(0, 25) : undefined;
-      if (snapshotName) {
+      const versionName = opts.name ? String(opts.name).slice(0, 25) : undefined;
+      if (versionName) {
         try {
-          await client.put(`/site-versions/${versionId}`, { name: snapshotName });
+          await client.put(`/site-versions/${versionId}`, { name: versionName });
         } catch {
-          info('Snapshot created, but naming it failed (you can rename it later).');
+          info('Version created, but naming it failed (you can rename it later).');
         }
       }
 
@@ -123,32 +126,32 @@ export function registerSnapshotsCommand(program: Command): void {
         if (isJsonMode()) {
           console.log(JSON.stringify({ success: true, data: { id: versionId, status: 'progress', task_id: taskId ?? null } }));
         } else {
-          success('Snapshot started', { id: versionId, status: 'progress' });
-          info('It will be restorable once complete. Check with: instawp snapshot list ' + label);
+          success('Version started', { id: versionId, status: 'progress' });
+          info('It will be restorable once complete. Check with: instawp versions list ' + label);
         }
         return;
       }
 
       if (taskId) {
-        const result = await pollTask(client, taskId, 'Creating snapshot');
+        const result = await pollTask(client, taskId, 'Creating version');
         if (result !== 'completed') {
-          info(`Snapshot (ID ${versionId}) is still processing. Check with: instawp snapshot list ${label}`);
+          info(`Version (ID ${versionId}) is still processing. Check with: instawp versions list ${label}`);
           process.exit(result === 'error' ? 1 : 0);
         }
       }
 
       if (isJsonMode()) {
-        console.log(JSON.stringify({ success: true, data: { id: versionId, status: 'completed', name: snapshotName || null } }));
+        console.log(JSON.stringify({ success: true, data: { id: versionId, status: 'completed', name: versionName || null } }));
       } else {
-        success('Snapshot ready', { id: versionId, ...(snapshotName ? { name: snapshotName } : {}) });
-        info(`Roll back any time with: instawp snapshot restore ${label} ${versionId}`);
+        success('Version ready', { id: versionId, ...(versionName ? { name: versionName } : {}) });
+        info(`Roll back any time with: instawp versions restore ${label} ${versionId}`);
       }
     });
 
-  // snapshot list <site>
-  snapshots
+  // versions list <site>
+  versionsCmd
     .command('list <site>')
-    .description('List a site\'s snapshots (most recent first)')
+    .description('List a site\'s versions (most recent first)')
     .action(async (siteIdentifier: string) => {
       requireAuth();
       const client = getClient();
@@ -164,7 +167,7 @@ export function registerSnapshotsCommand(program: Command): void {
         process.exit(1);
       }
 
-      const spin = spinner('Fetching snapshots...');
+      const spin = spinner('Fetching versions...');
       spin.start();
       try {
         const res = await client.get('/site-versions', { params: { site_id: site.id, per_page: 100 } });
@@ -175,7 +178,7 @@ export function registerSnapshotsCommand(program: Command): void {
           if (isJsonMode()) {
             console.log(JSON.stringify([]));
           } else {
-            info('No snapshots yet. Create one with: instawp snapshot create ' + (site.name || site.id));
+            info('No versions yet. Create one with: instawp versions create ' + (site.name || site.id));
           }
           return;
         }
@@ -190,16 +193,16 @@ export function registerSnapshotsCommand(program: Command): void {
 
         table(['ID', 'Name', 'Size', 'Status', 'Created'], rows);
       } catch (err: any) {
-        spin.fail('Failed to fetch snapshots');
-        error('Could not list snapshots', err.response?.data?.message || err.message);
+        spin.fail('Failed to fetch versions');
+        error('Could not list versions', err.response?.data?.message || err.message);
         process.exit(1);
       }
     });
 
-  // snapshot restore <site> <version-id>
-  snapshots
+  // versions restore <site> <version-id>
+  versionsCmd
     .command('restore <site> <version-id>')
-    .description('Roll a site back to a snapshot — OVERWRITES current files and database')
+    .description('Roll a site back to a version — OVERWRITES current files and database')
     .option('--force', 'Skip confirmation')
     .option('--no-wait', 'Return immediately instead of waiting for the restore to finish')
     .action(async (siteIdentifier: string, versionId: string, opts) => {
@@ -227,7 +230,7 @@ export function registerSnapshotsCommand(program: Command): void {
         const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
         const answer = await new Promise<string>((resolve) => {
           rl.question(
-            `Restore "${label}" to snapshot ${versionId}? This OVERWRITES the current files and database and cannot be undone. (y/N) `,
+            `Restore "${label}" to version ${versionId}? This OVERWRITES the current files and database and cannot be undone. (y/N) `,
             resolve,
           );
         });
@@ -248,7 +251,7 @@ export function registerSnapshotsCommand(program: Command): void {
         spin.stop();
       } catch (err: any) {
         spin.fail('Failed to start restore');
-        error('Could not restore snapshot', err.response?.data?.message || err.message);
+        error('Could not restore version', err.response?.data?.message || err.message);
         process.exit(1);
       }
 
@@ -256,14 +259,14 @@ export function registerSnapshotsCommand(program: Command): void {
         if (isJsonMode()) {
           console.log(JSON.stringify({ success: true, data: { site_id: site.id, version_id: Number(versionId), status: 'restoring', task_id: taskId ?? null } }));
         } else {
-          success('Restore started', { site: label, snapshot: versionId });
+          success('Restore started', { site: label, version: versionId });
           info('The site will be back shortly. Check with: instawp sites list');
         }
         return;
       }
 
       if (taskId) {
-        const result = await pollTask(client, taskId, 'Restoring snapshot');
+        const result = await pollTask(client, taskId, 'Restoring version');
         if (result !== 'completed') {
           info('Restore is still processing. The site will update once it finishes.');
           process.exit(result === 'error' ? 1 : 0);
@@ -273,14 +276,14 @@ export function registerSnapshotsCommand(program: Command): void {
       if (isJsonMode()) {
         console.log(JSON.stringify({ success: true, data: { site_id: site.id, version_id: Number(versionId), status: 'completed' } }));
       } else {
-        success(`"${label}" restored to snapshot ${versionId}`);
+        success(`"${label}" restored to version ${versionId}`);
       }
     });
 
-  // snapshot delete <site> <version-id...>
-  snapshots
+  // versions delete <site> <version-id...>
+  versionsCmd
     .command('delete <site> <version-ids...>')
-    .description('Delete one or more snapshots')
+    .description('Delete one or more versions')
     .option('--force', 'Skip confirmation')
     .action(async (siteIdentifier: string, versionIds: string[], opts) => {
       requireAuth();
@@ -300,7 +303,7 @@ export function registerSnapshotsCommand(program: Command): void {
 
       const ids = versionIds.map((v) => parseInt(v, 10)).filter((n) => !Number.isNaN(n));
       if (ids.length === 0) {
-        error('No valid snapshot IDs provided');
+        error('No valid version IDs provided');
         process.exit(1);
       }
 
@@ -312,7 +315,7 @@ export function registerSnapshotsCommand(program: Command): void {
         const readline = await import('node:readline');
         const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
         const answer = await new Promise<string>((resolve) => {
-          rl.question(`Delete ${ids.length} snapshot(s) [${ids.join(', ')}] of "${label}"? (y/N) `, resolve);
+          rl.question(`Delete ${ids.length} version(s) [${ids.join(', ')}] of "${label}"? (y/N) `, resolve);
         });
         rl.close();
         if (answer.toLowerCase() !== 'y') {
@@ -321,7 +324,7 @@ export function registerSnapshotsCommand(program: Command): void {
         }
       }
 
-      const spin = spinner('Deleting snapshot(s)...');
+      const spin = spinner('Deleting version(s)...');
       spin.start();
       try {
         const res = await client.delete('/site-versions', { data: { ids } });
@@ -335,11 +338,11 @@ export function registerSnapshotsCommand(program: Command): void {
           return;
         }
 
-        if (successIds.length) success(`Deleted snapshot(s): ${successIds.join(', ')}`);
+        if (successIds.length) success(`Deleted version(s): ${successIds.join(', ')}`);
         if (failedIds.length) error(`Failed to delete: ${failedIds.join(', ')}`);
       } catch (err: any) {
-        spin.fail('Failed to delete snapshot(s)');
-        error('Could not delete snapshots', err.response?.data?.message || err.message);
+        spin.fail('Failed to delete version(s)');
+        error('Could not delete versions', err.response?.data?.message || err.message);
         process.exit(1);
       }
     });

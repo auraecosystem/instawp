@@ -52,11 +52,11 @@ instawp create --name <n> [--php <v>] [--config <id>]
 instawp sites delete <site> [--force]
 instawp open <site> [--admin] [--magic] [--print]
 
-# Snapshots (restorable site versions)
-instawp snapshot create <site> [--name <label>] [--no-wait]
-instawp snapshot list <site>
-instawp snapshot restore <site> <version-id> [--force] [--no-wait]
-instawp snapshot delete <site> <version-id...> [--force]
+# Versions (restorable point-in-time site copies)
+instawp versions create <site> [--name <label>] [--no-wait]
+instawp versions list <site>
+instawp versions restore <site> <version-id> [--force] [--no-wait]
+instawp versions delete <site> <version-id...> [--force]
 
 # Remote access (wp is the primary command; exec is the escape hatch)
 instawp wp <site> <args...> [--api]           # WP-CLI on the site
@@ -201,12 +201,12 @@ See `vendor/win32/NOTICE.md` for source + license (BusyBox is GPL-2.0).
 | `POST /api/v2/sites` | sites create, local push (auto-create) |
 | `DELETE /api/v2/sites/{id}` | sites delete |
 | `POST /api/v2/sites/{id}/run-cmd` | exec --api, wp --api |
-| `GET /api/v2/site-versions?site_id={id}` | snapshot list |
-| `POST /api/v2/site-versions` | snapshot create |
-| `PUT /api/v2/site-versions/{id}` | snapshot create (set `--name`) |
-| `PUT /api/v2/sites/{id}/restore-versions/{versionId}` | snapshot restore |
-| `DELETE /api/v2/site-versions` | snapshot delete (body `{ids:[]}`) |
-| `GET /api/v2/tasks/{id}/status` | create, snapshot create/restore (poll task) |
+| `GET /api/v2/site-versions?site_id={id}` | versions list |
+| `POST /api/v2/site-versions` | versions create |
+| `PUT /api/v2/site-versions/{id}` | versions create (set `--name`) |
+| `PUT /api/v2/sites/{id}/restore-versions/{versionId}` | versions restore |
+| `DELETE /api/v2/site-versions` | versions delete (body `{ids:[]}`) |
+| `GET /api/v2/tasks/{id}/status` | create, versions create/restore (poll task) |
 | `GET /api/v2/ssh-keys` | SSH key matching |
 | `POST /api/v2/ssh-keys` | SSH key upload |
 | `POST /api/v2/sites/{id}/ssh-keys/{keyId}` | attach key to site |

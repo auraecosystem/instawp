@@ -216,56 +216,57 @@ describe('command registration', () => {
     expect(members.description()).toContain('members');
   });
 
-  it('registers snapshot command with create/list/restore/delete subcommands', async () => {
-    const { registerSnapshotsCommand } = await import('../commands/snapshots.js');
+  it('registers versions command with create/list/restore/delete subcommands', async () => {
+    const { registerVersionsCommand } = await import('../commands/versions.js');
     const program = new Command();
-    registerSnapshotsCommand(program);
-    const snapshot = program.commands.find(c => c.name() === 'snapshot');
-    expect(snapshot).toBeDefined();
-    const subNames = snapshot!.commands.map(c => c.name());
+    registerVersionsCommand(program);
+    const versions = program.commands.find(c => c.name() === 'versions');
+    expect(versions).toBeDefined();
+    const subNames = versions!.commands.map(c => c.name());
     expect(subNames).toContain('create');
     expect(subNames).toContain('list');
     expect(subNames).toContain('restore');
     expect(subNames).toContain('delete');
   });
 
-  it('snapshot has the "snapshots" alias', async () => {
-    const { registerSnapshotsCommand } = await import('../commands/snapshots.js');
+  it('versions has the "version" alias (and not "snapshot")', async () => {
+    const { registerVersionsCommand } = await import('../commands/versions.js');
     const program = new Command();
-    registerSnapshotsCommand(program);
-    const snapshot = program.commands.find(c => c.name() === 'snapshot')!;
-    expect(snapshot.aliases()).toContain('snapshots');
+    registerVersionsCommand(program);
+    const versions = program.commands.find(c => c.name() === 'versions')!;
+    expect(versions.aliases()).toContain('version');
+    expect(versions.aliases()).not.toContain('snapshot');
   });
 
-  it('snapshot create has --name and --no-wait options', async () => {
-    const { registerSnapshotsCommand } = await import('../commands/snapshots.js');
+  it('versions create has --name and --no-wait options', async () => {
+    const { registerVersionsCommand } = await import('../commands/versions.js');
     const program = new Command();
-    registerSnapshotsCommand(program);
-    const snapshot = program.commands.find(c => c.name() === 'snapshot')!;
-    const create = snapshot.commands.find(c => c.name() === 'create')!;
+    registerVersionsCommand(program);
+    const versions = program.commands.find(c => c.name() === 'versions')!;
+    const create = versions.commands.find(c => c.name() === 'create')!;
     const optNames = create.options.map(o => o.long);
     expect(optNames).toContain('--name');
     expect(optNames).toContain('--no-wait');
   });
 
-  it('snapshot restore has --force and --no-wait, and requires site + version-id', async () => {
-    const { registerSnapshotsCommand } = await import('../commands/snapshots.js');
+  it('versions restore has --force and --no-wait, and requires site + version-id', async () => {
+    const { registerVersionsCommand } = await import('../commands/versions.js');
     const program = new Command();
-    registerSnapshotsCommand(program);
-    const snapshot = program.commands.find(c => c.name() === 'snapshot')!;
-    const restore = snapshot.commands.find(c => c.name() === 'restore')!;
+    registerVersionsCommand(program);
+    const versions = program.commands.find(c => c.name() === 'versions')!;
+    const restore = versions.commands.find(c => c.name() === 'restore')!;
     const optNames = restore.options.map(o => o.long);
     expect(optNames).toContain('--force');
     expect(optNames).toContain('--no-wait');
     expect(restore.registeredArguments.map(a => a.name())).toEqual(['site', 'version-id']);
   });
 
-  it('snapshot delete has --force and accepts variadic version-ids', async () => {
-    const { registerSnapshotsCommand } = await import('../commands/snapshots.js');
+  it('versions delete has --force and accepts variadic version-ids', async () => {
+    const { registerVersionsCommand } = await import('../commands/versions.js');
     const program = new Command();
-    registerSnapshotsCommand(program);
-    const snapshot = program.commands.find(c => c.name() === 'snapshot')!;
-    const del = snapshot.commands.find(c => c.name() === 'delete')!;
+    registerVersionsCommand(program);
+    const versions = program.commands.find(c => c.name() === 'versions')!;
+    const del = versions.commands.find(c => c.name() === 'delete')!;
     expect(del.options.map(o => o.long)).toContain('--force');
     const lastArg = del.registeredArguments[del.registeredArguments.length - 1];
     expect(lastArg.variadic).toBe(true);
