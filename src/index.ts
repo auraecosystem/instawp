@@ -7,6 +7,7 @@ import { setJsonMode } from './lib/output.js';
 import { registerLoginCommand } from './commands/login.js';
 import { registerWhoamiCommand } from './commands/whoami.js';
 import { registerSitesCommand, registerCreateAlias } from './commands/sites.js';
+import { registerSnapshotsCommand } from './commands/snapshots.js';
 import { registerSyncCommand } from './commands/sync.js';
 import { registerSshCommand } from './commands/ssh.js';
 import { registerExecCommand, registerWpCommand } from './commands/exec.js';
@@ -42,6 +43,7 @@ registerWhoamiCommand(program);
 // -- Sites --
 registerSitesCommand(program);
 registerCreateAlias(program);
+registerSnapshotsCommand(program);
 
 // -- Remote access --
 registerWpCommand(program);
@@ -98,6 +100,12 @@ ${d('Sites')}
   ${c('sites delete')}       Delete a site
   ${c('open')}   ${d('<site>')}         Open site (or --admin / --magic) in browser
 
+${d('Snapshots')} ${d('(restorable site versions)')}
+  ${c('snapshot create')}    Snapshot a site before risky changes
+  ${c('snapshot list')}      List a site's snapshots
+  ${c('snapshot restore')}   Roll a site back to a snapshot
+  ${c('snapshot delete')}    Delete snapshots
+
 ${d('Remote Access')}
   ${c('wp')}     ${d('<site>')} ${d('<args>')} WP-CLI on a remote site (primary)
   ${c('ssh')}    ${d('<site>')}         Interactive SSH session
@@ -127,6 +135,8 @@ ${d('Examples')}
   $ instawp local create --name blog
   $ instawp wp my-site plugin list
   $ instawp wp my-site -- post list --post_type=page
+  $ instawp snapshot create my-site --name "before plugin update"
+  $ instawp snapshot restore my-site 1234
   $ instawp open my-site --admin
   $ instawp db pull my-site
   $ instawp logs my-site --follow

@@ -58,6 +58,17 @@ export interface SiteDetails {
   main_domain?: string;
 }
 
+export interface SiteVersion {
+  id: number;
+  name: string | null;
+  site_id: number;
+  status: string;
+  size_mb?: number;
+  file_size_mb?: number;
+  db_size_mb?: number;
+  created_at?: string;
+}
+
 export interface SshKeyInfo {
   id: number;
   label: string;

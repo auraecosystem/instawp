@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.1-beta.15 (2026-06-01)
+
+### Added — `snapshot` command (restorable site versions)
+- New `instawp snapshot create|list|restore|delete` (alias `snapshots`) for managing **site snapshots** — InstaWP's restorable "site versions", point-in-time copies of a site's files + database. Unlike backups, a snapshot can be rolled back to **in-place**.
+- Built for the AI-agent workflow: take a snapshot *before* letting an agent run a batch of changes, then roll back the one that broke it in a single command.
+  - `snapshot create <site> [--name <label>] [--no-wait]` — waits for the snapshot to finish by default; `--no-wait` returns as soon as it's queued.
+  - `snapshot list <site>` — ID, name, size, status, and creation date.
+  - `snapshot restore <site> <version-id> [--force] [--no-wait]` — **overwrites** the live site's files + database; prompts for confirmation unless `--force`.
+  - `snapshot delete <site> <version-id...> [--force]`.
+- All subcommands support `--json`. Long-running create/restore poll task status with a progress spinner.
+
 ## 0.0.1-beta.14 (2026-05-28)
 
 ### Improved — clearer first-run for `local` commands
