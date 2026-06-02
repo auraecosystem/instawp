@@ -162,6 +162,7 @@ Windows ships with `ssh`/`scp` but not `rsync`, `awk`, or `sqlite3`. The CLI wor
 - **`vendor/win32/busybox.exe`** — provides `awk` for the `mysql2sqlite` script (invoked as `busybox awk -f ...`). Statically linked, no DLLs. This is the **only** bundled binary.
 - **Pure-JS SFTP** (`ssh2-sftp-client`) for file transfers — see below.
 - **`cross-spawn`** for launching WordPress Playground (`local create/start/clone`). `npx`/`wp-playground-cli` are `.cmd` shims on Windows; Node won't spawn `.cmd` without `shell:true` (CVE-2024-27980), so `local-env.ts` uses `cross-spawn` (resolves the shim + quotes mount-path args safely). Never use bare `child_process.spawn` for npx/.cmd on Windows.
+- **Playground mounts** (`local-env.ts` → `buildMountArgs()`): never colon-join `host:vfs` on Windows. wp-playground-cli's `--mount=<host>:<vfs>` splits on `:`, and a Windows drive-letter colon (`C:\...`) makes the split fail with `Invalid mount format`. On Windows use `--mount-dir` / `--mount-dir-before-install` (host + vfs as two separate `nargs:2` args — identical mount, no colon). macOS/Linux keep the colon form. Works for both directory and file mounts.
 
 ### File transfer: rsync (mac/Linux) vs SFTP (Windows)
 - `syncFiles()` in `src/lib/ssh-connection.ts` is the dispatcher. On macOS/Linux it shells out to `rsync` (delta sync). On Windows it calls `syncViaSftp()` (`src/lib/sftp-sync.ts`).
@@ -243,17 +244,18 @@ instawp --help
 
 ## Publishing
 
-**Workflow**: Push a `v*` tag → GitHub Actions builds, tests, publishes to npm.
+**Workflow**: Push a `v*` tag → GitHub Actions builds, tests, publishes to npm. Full procedure: skill `iwp-cli-release`. **Tag-based, not the Laravel repos' dev→main PR flow.**
 
 ```bash
-# Bump version in package.json, then:
-git tag v0.0.1-beta.2
-git push origin v0.0.1-beta.2
+# 1. Bump version in package.json
+# 2. Add a "## <version> (YYYY-MM-DD)" entry at the TOP of CHANGELOG.md  (required)
+# 3. Commit (explicit paths — repo has unrelated untracked files; dist/ is gitignored)
+git tag -a v0.0.1-beta.2 -m "..." && git push origin v0.0.1-beta.2
 ```
 
-- Publishes with `--tag beta` (install via `npm i -g @instawp/cli@beta`)
-- Uses `NPM_TOKEN` secret (generated from vikas@instawp.com npm account)
-- Remove `--tag beta` from workflow for stable releases
+- Publishes with `--tag beta` (install via `npm i -g @instawp/cli@beta`). `latest` stays on an old stable; drop `--tag beta` for stable releases. Uses `NPM_TOKEN`.
+- **`publish.yml`** (tag-triggered): Windows smoke test → build → test → npm publish → GitHub Release. **`release-notify.yml`** (also tag-triggered, unlike siblings which fire on PR-merge) → Claude summary to Slack. Both extract the CHANGELOG section by **exact** `## <version> ` header match, so the version in `package.json`, the tag, and the CHANGELOG header must all agree.
+- Pushing the tag is the release trigger; pushing `main` alone publishes nothing. Tag dispatch / secret listing needs repo admin (a normal token gets 403).
 
 ## Conventions
 
