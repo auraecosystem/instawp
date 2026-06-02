@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.1-beta.17 (2026-06-02)
+
+### Fixed — `local start` / `local create` mount failure on Windows
+- On Windows, `instawp local start` (and `local create`) failed with `Invalid mount format: C:\...\wp-content:/wordpress/wp-content`. wp-playground-cli's `--mount=<host>:<vfs>` splits the value on `:`, and a Windows host path's drive-letter colon (`C:\...`) produced 3+ parts, so Playground rejected the mount.
+- **Fix**: on Windows the CLI now uses Playground's `--mount-dir` / `--mount-dir-before-install` flags, which take the host and vfs paths as two separate arguments (no colon to split). Applies to fresh sites, cloned-site subdirectory mounts, and individual file mounts. macOS/Linux keep the existing `--mount=<host>:<vfs>` form unchanged. (Reported by QA on Windows; `@wp-playground/cli` ≥ the version exposing `--mount-dir`.)
+
 ## 0.0.1-beta.16 (2026-06-02)
 
 ### Changed — renamed `snapshot` → `versions`

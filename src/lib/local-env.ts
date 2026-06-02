@@ -156,6 +156,33 @@ export function deleteInstanceDir(name: string): void {
   }
 }
 
+/**
+ * Build the wp-playground-cli argument(s) to mount a host path at a VFS path.
+ *
+ * `--mount` / `--mount-before-install` take a single `host:vfs` value, which
+ * wp-playground-cli splits on `:`. On Windows the host path contains a
+ * drive-letter colon (e.g. `C:\Users\...\wp-content`), so the split yields 3+
+ * parts and Playground rejects it with "Invalid mount format". On Windows we
+ * instead use `--mount-dir` / `--mount-dir-before-install`, which take the host
+ * and vfs paths as two separate args (`nargs: 2`) and avoid the colon entirely.
+ * Both forms resolve to the same `{ hostPath, vfsPath }` mount in Playground
+ * (no file-vs-directory distinction), so this works for files and directories.
+ *
+ * macOS/Linux keep the long-standing colon form unchanged (their absolute paths
+ * have no drive-letter colon). `platform` is injectable for testing.
+ */
+export function buildMountArgs(
+  hostPath: string,
+  vfsPath: string,
+  opts: { beforeInstall?: boolean; platform?: NodeJS.Platform } = {},
+): string[] {
+  const platform = opts.platform ?? process.platform;
+  if (platform === 'win32') {
+    return [opts.beforeInstall ? '--mount-dir-before-install' : '--mount-dir', hostPath, vfsPath];
+  }
+  return [`${opts.beforeInstall ? '--mount-before-install' : '--mount'}=${hostPath}:${vfsPath}`];
+}
+
 function buildServerArgs(instance: LocalInstance, blueprint?: string): string[] {
   const wpContentDir = join(instance.path, 'wp-content');
   const isClone = existsSync(join(instance.path, 'sqlite-import.sql')) ||
@@ -176,7 +203,7 @@ function buildServerArgs(instance: LocalInstance, blueprint?: string): string[] 
     for (const subdir of subdirs) {
       const hostDir = join(wpContentDir, subdir);
       if (existsSync(hostDir)) {
-        args.push(`--mount=${hostDir}:/wordpress/wp-content/${subdir}`);
+        args.push(...buildMountArgs(hostDir, `/wordpress/wp-content/${subdir}`));
       }
     }
     // Mount non-core root files (CLAUDE.md, .htaccess, etc.)
@@ -186,7 +213,7 @@ function buildServerArgs(instance: LocalInstance, blueprint?: string): string[] 
       const filePath = join(instance.path, file);
       const stat = statSync(filePath);
       if (stat.isFile()) {
-        args.push(`--mount=${filePath}:/wordpress/${file}`);
+        args.push(...buildMountArgs(filePath, `/wordpress/${file}`));
       }
     }
 
@@ -199,7 +226,7 @@ function buildServerArgs(instance: LocalInstance, blueprint?: string): string[] 
     }
   } else {
     // For fresh sites: mount entire wp-content before install for persistence
-    args.push(`--mount-before-install=${wpContentDir}:/wordpress/wp-content`);
+    args.push(...buildMountArgs(wpContentDir, '/wordpress/wp-content', { beforeInstall: true }));
   }
 
   if (blueprint) {
