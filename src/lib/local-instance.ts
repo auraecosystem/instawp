@@ -21,6 +21,33 @@ export function defaultInstanceName(site: { id: number; name?: string; sub_domai
 }
 
 /**
+ * Extract a table prefix from `wp config get table_prefix` stdout, ignoring an
+ * SSH login banner/MOTD that InstaWP servers prepend to non-interactive command
+ * output. Returns the LAST identifier-only line (the command's real output comes
+ * after any banner), or `fallback` if none looks valid.
+ */
+export function parseTablePrefix(stdout: string, fallback = 'wp_'): string {
+  const lines = stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^[A-Za-z0-9_]+$/.test(lines[i])) return lines[i];
+  }
+  return fallback;
+}
+
+/**
+ * Parse `SHOW TABLES` stdout into a set of table names, dropping MOTD/banner and
+ * any non-identifier lines (MySQL table names are `[A-Za-z0-9_$]+`). Junk lines
+ * with spaces/punctuation are excluded; a stray one-word banner line would at
+ * worst add an unused entry (never causes a real table to be skipped, since the
+ * intersection is keyed on local → cloud names).
+ */
+export function parseSqlTableNames(stdout: string): Set<string> {
+  return new Set(
+    stdout.split('\n').map((s) => s.trim()).filter((t) => /^[A-Za-z0-9_$]+$/.test(t)),
+  );
+}
+
+/**
  * Which cloud site a `local push` should target, in priority order:
  *   1. an explicit cloud-site argument
  *   2. the cloud site this instance was cloned from (`cloudSiteId`)

@@ -1,7 +1,5 @@
 import { Command } from 'commander';
-import { spawnSync } from 'node:child_process';
 import { join, dirname, basename } from 'node:path';
-import { homedir } from 'node:os';
 import { existsSync, mkdirSync, statSync, createReadStream, createWriteStream, unlinkSync } from 'node:fs';
 import { createGunzip } from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
@@ -10,36 +8,8 @@ import chalk from 'chalk';
 import { requireAuth } from '../lib/api.js';
 import { resolveSite } from '../lib/site-resolver.js';
 import { ensureSshAccess } from '../lib/ssh-keys.js';
-import { execViaSsh, execViaSshToFile } from '../lib/ssh-connection.js';
+import { execViaSsh, execViaSshToFile, scpUpload } from '../lib/ssh-connection.js';
 import { success, error, spinner, info, isJsonMode } from '../lib/output.js';
-import type { SshConnection } from '../types.js';
-
-const KNOWN_HOSTS = join(homedir(), '.instawp', 'known_hosts');
-
-/**
- * Build scp args matching the ssh-connection.ts ssh args (key, known-hosts,
- * StrictHostKeyChecking). Note `scp` uses uppercase `-P` for port.
- */
-function scpArgs(conn: SshConnection): string[] {
-  return [
-    '-i', conn.privateKeyPath,
-    '-P', String(conn.port),
-    '-o', 'StrictHostKeyChecking=accept-new',
-    '-o', `UserKnownHostsFile=${KNOWN_HOSTS}`,
-  ];
-}
-
-function scpUpload(conn: SshConnection, localPath: string, remotePath: string): number {
-  const target = `${conn.username}@${conn.host}:${remotePath}`;
-  const result = spawnSync('scp', [...scpArgs(conn), localPath, target], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    encoding: 'utf-8',
-  });
-  if ((result.status ?? 1) !== 0 && result.stderr) {
-    console.error(result.stderr);
-  }
-  return result.status ?? 1;
-}
 
 /** Timestamp like `2026-05-23T12-34-56` (filename-safe — `:` is illegal on Windows). */
 function isoTimestamp(): string {

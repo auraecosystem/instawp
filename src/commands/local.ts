@@ -1,7 +1,9 @@
 import { Command } from 'commander';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 import chalk from 'chalk';
 import open from 'open';
 import Database from 'better-sqlite3';
@@ -28,11 +30,12 @@ import {
 import { requireAuth, getClient } from '../lib/api.js';
 import { resolveSite } from '../lib/site-resolver.js';
 import { ensureSshAccess } from '../lib/ssh-keys.js';
-import { syncFiles, execViaSsh, execViaSshToFile } from '../lib/ssh-connection.js';
+import { syncFiles, execViaSsh, execViaSshToFile, scpUpload } from '../lib/ssh-connection.js';
 import { listLocalFiles } from '../lib/sftp-sync.js';
-import { sanitizeName, defaultInstanceName, pushTargetRef } from '../lib/local-instance.js';
+import { sanitizeName, defaultInstanceName, pushTargetRef, parseTablePrefix, parseSqlTableNames } from '../lib/local-instance.js';
+import { generateMysqlDump } from '../lib/sqlite-to-mysql.js';
 import { success, error, table, spinner, info, isJsonMode } from '../lib/output.js';
-import type { LocalInstance } from '../types.js';
+import type { LocalInstance, SshConnection } from '../types.js';
 
 export function registerLocalCommand(program: Command): void {
   const local = program
@@ -224,6 +227,9 @@ export function registerLocalCommand(program: Command): void {
     .description('Push local wp-content to an InstaWP cloud site')
     .option('--include <pattern...>', 'Include patterns (e.g. .git)')
     .option('--exclude <pattern...>', 'Additional exclude patterns')
+    .option('--with-db', 'Also push the local database, OVERWRITING the cloud DB (backs it up first)')
+    .option('--no-backup', 'With --with-db: skip the cloud DB backup before overwrite (DANGEROUS)')
+    .option('--force', 'With --with-db: skip the overwrite confirmation prompt')
     .option('--dry-run', 'Show what would be transferred')
     .action(async (localName: string, cloudSiteArg: string | undefined, opts: any) => {
       requireAuth();
@@ -358,14 +364,34 @@ export function registerLocalCommand(program: Command): void {
 
       const exitCode = await syncFiles(conn, localWpContent, remoteTarget, extraArgs, !!opts.dryRun, true);
 
-      if (exitCode === 0) {
-        success('Push complete!');
-        if (site.url) {
-          console.log(`\n  ${chalk.dim('Cloud site:')} ${chalk.cyan.underline(site.url)}`);
-        }
-      } else {
+      if (exitCode !== 0) {
         error(`rsync exited with code ${exitCode}`);
         process.exit(exitCode);
+      }
+
+      // Optionally push the database too (OVERWRITES the cloud DB). Handles its
+      // own dry-run reporting and confirmation.
+      let dbStatus: 'done' | 'cancelled' | 'dry' | null = null;
+      if (opts.withDb) {
+        dbStatus = await pushDatabase(instance, site, conn, opts);
+      }
+
+      // Dry-run output was already emitted by the file sync (and pushDatabase);
+      // don't print a misleading "complete".
+      if (opts.dryRun) return;
+
+      if (dbStatus === 'cancelled') {
+        info('Files pushed. Database push was cancelled — the cloud database was not changed.');
+        if (site.url) console.log(`\n  ${chalk.dim('Cloud site:')} ${chalk.cyan.underline(site.url)}`);
+        return;
+      }
+
+      success('Push complete!');
+      if (site.url) {
+        console.log(`\n  ${chalk.dim('Cloud site:')} ${chalk.cyan.underline(site.url)}`);
+      }
+      if (!opts.withDb) {
+        info('Files only. Database/content changes (pages, posts, settings) were NOT pushed — add --with-db to overwrite the cloud database.');
       }
     });
 
@@ -738,6 +764,202 @@ ${chalk.bold.green('Clone complete!')}
         info(`Start with: instawp local start ${name}`);
       }
     });
+}
+
+/** True if a URL is a plain http(s) URL safe to embed in a single-quoted shell arg. */
+function isShellSafeUrl(u: string): boolean {
+  return /^https?:\/\/[^\s'"\\$`]+$/.test(u);
+}
+
+/**
+ * Push the local Playground SQLite database to the cloud site's MySQL, OVERWRITING
+ * it. Steps: read the local site URL, discover the cloud table prefix + existing
+ * tables, generate a data-only MySQL dump (TRUNCATE+INSERT for tables present on
+ * both), back up the cloud DB, upload + import, then `wp search-replace` the URL
+ * (serialization-safe). Honors --dry-run / --no-backup / --force.
+ */
+async function pushDatabase(instance: LocalInstance, site: any, conn: SshConnection, opts: any): Promise<'done' | 'cancelled' | 'dry'> {
+  const sqlitePath = join(instance.path, 'wp-content', 'database', '.ht.sqlite');
+  if (!existsSync(sqlitePath)) {
+    error('No local database found (expected wp-content/database/.ht.sqlite). Skipping DB push.');
+    process.exit(1);
+  }
+
+  const wpPath = `/home/${conn.username}/web/${conn.domain}/public_html`;
+
+  // Authoritative local URL from the DB (handles port drift); cloud URL from the site.
+  let fromUrl = `http://127.0.0.1:${instance.port}`;
+  try {
+    const ldb = new Database(sqlitePath, { readonly: true });
+    try {
+      const row = ldb.prepare("SELECT option_value AS v FROM wp_options WHERE option_name='siteurl'").get() as { v?: string } | undefined;
+      if (row?.v) fromUrl = String(row.v).replace(/\/+$/, '');
+    } finally { ldb.close(); }
+  } catch { /* fall back to the constructed local URL */ }
+  const toUrl = String(site.url || `https://${conn.domain}`).replace(/\/+$/, '');
+
+  // Destructive confirmation (skipped on --force; --json requires --force).
+  if (!opts.force && !opts.dryRun) {
+    if (isJsonMode()) {
+      error('--force is required with --with-db in --json mode (cannot prompt before overwriting the cloud DB).');
+      process.exit(1);
+    }
+    const backupLine = opts.backup !== false
+      ? `The cloud DB will be backed up to ~/db-backup-<ts>.sql.gz first.`
+      : chalk.red('NO cloud backup will be taken (--no-backup). This is irreversible.');
+    console.log(`\nThis will ${chalk.bold.red('OVERWRITE')} the database on ${chalk.bold(conn.domain)} with your local data.`);
+    console.log(backupLine);
+    const readline = await import('node:readline');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const ans = await new Promise<string>((r) => rl.question('Continue? (y/N) ', r));
+    rl.close();
+    const yes = ans.trim().toLowerCase();
+    if (yes !== 'y' && yes !== 'yes') {
+      return 'cancelled';
+    }
+  }
+
+  // Discover cloud prefix + existing tables so we only TRUNCATE/INSERT tables
+  // that exist there (a missing-table TRUNCATE would abort the whole import).
+  const inspectSpin = spinner('Inspecting cloud database...');
+  inspectSpin.start();
+  // Parse discovery output defensively — InstaWP SSH prepends a login banner to
+  // non-interactive stdout (the clone flow strips the same banner). A banner
+  // leaking into the prefix would mismatch every table and silently push nothing.
+  const prefixRes = execViaSsh(conn, `cd ${wpPath} && wp config get table_prefix`);
+  const cloudPrefix = parseTablePrefix(prefixRes.exitCode === 0 ? prefixRes.stdout : '', 'wp_');
+  const tablesRes = execViaSsh(conn, `cd ${wpPath} && wp db query 'SHOW TABLES' --skip-column-names`);
+  if (tablesRes.exitCode !== 0) {
+    inspectSpin.fail('Could not read the cloud database');
+    if (tablesRes.stderr) error(tablesRes.stderr.trim());
+    process.exit(1);
+  }
+  const cloudTables = parseSqlTableNames(tablesRes.stdout);
+  inspectSpin.succeed(`Cloud DB: prefix "${cloudPrefix}", ${cloudTables.size} tables`);
+
+  // Generate the data-only MySQL dump from local SQLite.
+  const localDumpPath = join(tmpdir(), `instawp-localpush-${randomBytes(6).toString('hex')}.sql`);
+  const genSpin = spinner('Generating database dump...');
+  genSpin.start();
+  let dump;
+  try {
+    dump = generateMysqlDump({ sqlitePath, cloudPrefix, cloudTables, outPath: localDumpPath });
+  } catch (err: any) {
+    genSpin.fail('Failed to generate the database dump');
+    error(err?.message || String(err));
+    try { unlinkSync(localDumpPath); } catch { /* ignore */ }
+    process.exit(1);
+  }
+  genSpin.succeed(`Dump ready: ${dump.tables.length} table(s), ${dump.totalRows} row(s)` +
+    (dump.skipped.length ? ` (skipped ${dump.skipped.length} local-only table(s))` : ''));
+
+  // Cloud tables (with the cloud prefix) that have no local counterpart — they
+  // keep their existing data on an overwrite. Surface them so it's not surprising.
+  const dumpedCloud = new Set(dump.tables.map((t) => t.cloud));
+  const untouched = [...cloudTables].filter((t) => t.startsWith(cloudPrefix) && !dumpedCloud.has(t));
+
+  // Dry run: report and stop (no cloud writes).
+  if (opts.dryRun) {
+    if (isJsonMode()) {
+      console.log(JSON.stringify({ success: true, dry_run: true, db: { from_url: fromUrl, to_url: toUrl, tables: dump.tables, skipped: dump.skipped, untouched, total_rows: dump.totalRows } }));
+    } else {
+      info(`(dry run) Would OVERWRITE the cloud DB on ${conn.domain}:`);
+      for (const t of dump.tables) console.log(`  ${chalk.dim('•')} ${t.cloud} (${t.rows} rows)`);
+      if (dump.skipped.length) info(`(dry run) Skipped local-only tables: ${dump.skipped.join(', ')}`);
+      if (untouched.length) info(`(dry run) Cloud tables kept as-is (no local counterpart): ${untouched.join(', ')}`);
+      if (fromUrl !== toUrl) info(`(dry run) Then: wp search-replace ${fromUrl} ${toUrl}`);
+    }
+    try { unlinkSync(localDumpPath); } catch { /* ignore */ }
+    return 'dry';
+  }
+
+  // Refuse to push an empty dump: if nothing intersected, the cloud discovery
+  // (prefix/tables) almost certainly went wrong — overwriting would be a silent
+  // no-op that looks successful. Fail loud and change nothing.
+  if (dump.tables.length === 0) {
+    error(`No local tables matched the cloud database (cloud prefix "${cloudPrefix}", ${cloudTables.size} cloud tables). Refusing to push an empty database — nothing was changed.`);
+    try { unlinkSync(localDumpPath); } catch { /* ignore */ }
+    process.exit(1);
+  }
+  if (untouched.length) {
+    info(`${untouched.length} cloud table(s) have no local counterpart and will KEEP their existing data: ${untouched.slice(0, 8).join(', ')}${untouched.length > 8 ? ', …' : ''}`);
+  }
+
+  // Back up the cloud DB first (unless --no-backup). Random suffix so same-second
+  // reruns never clobber a prior backup.
+  const takeBackup = opts.backup !== false;
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').replace(/-\d{3}Z$/, '');
+  const backupFilename = `db-backup-${ts}-${randomBytes(3).toString('hex')}.sql.gz`;
+  const backupRemotePath = `/home/${conn.username}/${backupFilename}`;
+  if (takeBackup) {
+    const bSpin = spinner(`Backing up cloud database to ~/${backupFilename}...`);
+    bSpin.start();
+    const bRes = execViaSsh(conn, `cd ${wpPath} && wp db export --single-transaction - | gzip > ${backupRemotePath}`);
+    if (bRes.exitCode !== 0) {
+      bSpin.fail('Cloud DB backup failed — aborting DB push');
+      if (bRes.stderr) error(bRes.stderr.trim());
+      try { unlinkSync(localDumpPath); } catch { /* ignore */ }
+      process.exit(1);
+    }
+    bSpin.succeed(`Cloud DB backed up: ~/${backupFilename}`);
+  } else {
+    info('Skipping cloud DB backup (--no-backup).');
+  }
+
+  // Upload + import.
+  const remoteTmp = `/tmp/instawp-dbimport-${randomBytes(6).toString('hex')}.sql`;
+  const upSpin = spinner('Uploading database dump...');
+  upSpin.start();
+  const scpExit = scpUpload(conn, localDumpPath, remoteTmp);
+  try { unlinkSync(localDumpPath); } catch { /* ignore */ }
+  if (scpExit !== 0) {
+    upSpin.fail(`Upload failed (scp exit ${scpExit})`);
+    if (takeBackup) info(`Cloud backup preserved: ~/${backupFilename}`);
+    process.exit(1);
+  }
+  upSpin.succeed('Upload complete');
+
+  const impSpin = spinner(`Importing database on ${conn.domain}...`);
+  impSpin.start();
+  const impRes = execViaSsh(conn, `cd ${wpPath} && wp db import ${remoteTmp}`);
+  if (impRes.exitCode !== 0) {
+    impSpin.fail('Database import failed');
+    if (impRes.stderr) error(impRes.stderr.trim());
+    else if (impRes.stdout) error(impRes.stdout.trim());
+    execViaSsh(conn, `rm -f ${remoteTmp}`);
+    if (takeBackup) {
+      info(`Cloud backup preserved at ~/${backupFilename}. Restore it with:`);
+      console.log(`  ssh ${conn.username}@${conn.host} 'cd ${wpPath} && gunzip -c ${backupRemotePath} | wp db import -'`);
+    } else {
+      error('No backup was taken — the cloud database may be inconsistent.');
+    }
+    process.exit(1);
+  }
+  impSpin.succeed('Database imported');
+
+  // Rewrite local URL → cloud URL, serialization-safe via wp-cli.
+  if (fromUrl !== toUrl) {
+    if (isShellSafeUrl(fromUrl) && isShellSafeUrl(toUrl)) {
+      const srSpin = spinner(`Rewriting URLs (${fromUrl} → ${toUrl})...`);
+      srSpin.start();
+      const srRes = execViaSsh(conn, `cd ${wpPath} && wp search-replace '${fromUrl}' '${toUrl}' --all-tables --report-changed-only`);
+      if (srRes.exitCode !== 0) {
+        srSpin.fail('URL rewrite failed (DB imported; run search-replace manually if links are wrong)');
+        if (srRes.stderr) error(srRes.stderr.trim());
+      } else {
+        srSpin.succeed('URLs rewritten');
+      }
+    } else {
+      info(`Skipped URL rewrite (unsafe URL). Run manually: wp search-replace '<local>' '${toUrl}' --all-tables`);
+    }
+  }
+
+  // Flush caches + clean up remote temp (best effort).
+  execViaSsh(conn, `cd ${wpPath} && wp cache flush`);
+  execViaSsh(conn, `rm -f ${remoteTmp}`);
+
+  if (takeBackup) info(`Cloud DB backup kept at ~/${backupFilename} (on remote).`);
+  return 'done';
 }
 
 function checkRsync(): boolean {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeName, defaultInstanceName, pushTargetRef } from '../lib/local-instance.js';
+import { sanitizeName, defaultInstanceName, pushTargetRef, parseTablePrefix, parseSqlTableNames } from '../lib/local-instance.js';
 
 describe('sanitizeName', () => {
   it('lowercases and replaces non [a-z0-9_-] with -', () => {
@@ -45,5 +45,40 @@ describe('pushTargetRef', () => {
   it('treats a blank arg as no arg, deferring to the origin', () => {
     expect(pushTargetRef('   ', { cloudSiteId: 7 })).toBe('7');
     expect(pushTargetRef('  ', {})).toBeUndefined();
+  });
+});
+
+describe('parseTablePrefix (MOTD-resilient)', () => {
+  it('returns the prefix on a clean single line', () => {
+    expect(parseTablePrefix('wp_\n')).toBe('wp_');
+    expect(parseTablePrefix('wp_abc_')).toBe('wp_abc_');
+  });
+  it('ignores an SSH banner and takes the last identifier-only line', () => {
+    const stdout = 'Welcome to Ubuntu 22.04 LTS\nLast login: Tue Jun 3\n* Docs: https://help.example\nwp_\n';
+    expect(parseTablePrefix(stdout)).toBe('wp_');
+  });
+  it('falls back when nothing looks like a prefix', () => {
+    expect(parseTablePrefix('** banner only: see https://x **', 'wp_')).toBe('wp_');
+    expect(parseTablePrefix('', 'wp_')).toBe('wp_');
+  });
+});
+
+describe('parseSqlTableNames (MOTD-resilient)', () => {
+  it('keeps valid table names and drops banner/junk lines', () => {
+    const stdout = [
+      'Welcome to Ubuntu 22.04 LTS',
+      'Last login: Tue Jun 3 from 10.0.0.1',
+      'wp_options',
+      'wp_posts',
+      'wp_wc_orders',
+      '',
+    ].join('\n');
+    const set = parseSqlTableNames(stdout);
+    expect(set.has('wp_options')).toBe(true);
+    expect(set.has('wp_posts')).toBe(true);
+    expect(set.has('wp_wc_orders')).toBe(true);
+    // banner lines (contain spaces/punctuation) are excluded
+    expect([...set].some((t) => t.includes(' '))).toBe(false);
+    expect(set.has('Welcome')).toBe(false); // multi-word line dropped entirely
   });
 });

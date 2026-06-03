@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.1-beta.20 (2026-06-03)
+
+### Added — `local push --with-db` (push the database back to the cloud)
+- `instawp local push <local>` was **files-only** (it synced `wp-content` but not the database), so content changes — new pages, posts, settings — never reached the cloud. New **`--with-db`** flag also pushes the local Playground database, OVERWRITING the cloud MySQL.
+- How it works: backs up the cloud DB first (`--no-backup` to skip), converts the local SQLite to MySQL **data-only** (reuses the cloud's existing schema — no fragile type-mapping), imports it, and runs a serialization-safe `wp search-replace` to fix local→cloud URLs. Only tables present on both sides are synced; local-only tables (e.g. a plugin's tables created after cloning) are reported and skipped. `--dry-run` previews with zero cloud writes; `--force` skips the confirmation; `--json` requires `--force`.
+- A plain `local push` now prints a one-line reminder that the database wasn't pushed (use `--with-db`).
+- Validated end-to-end against a real InstaWP site (clone → add page → push --with-db → page + correct URLs on cloud). There is no official WordPress SQLite→MySQL exporter ([sqlite-database-integration#36](https://github.com/WordPress/sqlite-database-integration/issues/36)); this is a self-contained, data-safe implementation.
+
 ## 0.0.1-beta.19 (2026-06-03)
 
 ### Fixed — `local push` after `local clone` created a new site instead of pushing back

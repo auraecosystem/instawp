@@ -127,6 +127,17 @@ All commands support `--json` for machine-readable output.
 9. Generate blueprint with `WP_SQLITE_AST_DRIVER=true` + `login` step with actual admin username
 10. Write error suppression mu-plugin
 
+### DB push flow (`local push --with-db`) — SQLite → MySQL (the reverse of clone)
+Pushes the local Playground DB back to the cloud MySQL, OVERWRITING it. Implemented in `pushDatabase()` (`commands/local.ts`) + `lib/sqlite-to-mysql.ts`.
+1. Read local siteurl from `wp_options` (authoritative; handles port drift)
+2. Discover cloud `table_prefix` + existing tables via SSH — **MOTD-stripped** (`parseTablePrefix`/`parseSqlTableNames` in `lib/local-instance.ts`); a banner leaking in would mismatch every table → silent empty push
+3. `generateMysqlDump()`: **data-only** (`TRUNCATE`+`INSERT`, no `CREATE TABLE`) for local `wp_*` tables whose cloud-prefixed name exists on the cloud (intersection — so a missing-table TRUNCATE can't abort the import). Pins `sql_mode` (backslash escaping), `safeIntegers(true)` (no >2^53 loss), BLOB→`0x` hex (empty→`''`), byte-budgeted INSERT batching
+4. Refuse if 0 tables intersect (fail loud, never a silent no-op)
+5. Back up cloud DB (`wp db export | gzip`), abort if it fails (unless `--no-backup`)
+6. scp upload → `wp db import` → `wp search-replace <local-url> <cloud-url>` (serialization-safe — NOT done in SQL) → `wp cache flush`
+
+**Why no official tool:** WordPress has no SQLite→MySQL exporter — [sqlite-database-integration#36](https://github.com/WordPress/sqlite-database-integration/issues/36) is open since 2023; the community workaround regenerates schema with `text→varchar(255)` (truncates content) + `addslashes`. Our data-only approach (reuse cloud schema) avoids both. `wp db export` can't help (shells to mysqldump, absent in Playground). Caveat: assumes schema parity (true for clones); plugin tables created only-locally are skipped.
+
 ### Background mode
 - `--background` flag spawns detached process, polls until server responds, returns immediately
 - PID stored at `<instance>/server.pid`, logs at `<instance>/server.log`

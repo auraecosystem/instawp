@@ -36,6 +36,30 @@ function sshTarget(conn: SshConnection): string {
   return `${conn.username}@${conn.host}`;
 }
 
+/** scp args mirroring sshArgs (key, port via uppercase -P, known-hosts). */
+function scpArgs(conn: SshConnection): string[] {
+  ensureKnownHosts();
+  return [
+    '-i', conn.privateKeyPath,
+    '-P', String(conn.port),
+    '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', `UserKnownHostsFile=${KNOWN_HOSTS}`,
+  ];
+}
+
+/** Upload a single local file to the remote via scp. Returns the exit code. */
+export function scpUpload(conn: SshConnection, localPath: string, remotePath: string): number {
+  const target = `${conn.username}@${conn.host}:${remotePath}`;
+  const result = spawnSync('scp', [...scpArgs(conn), localPath, target], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf-8',
+  });
+  if ((result.status ?? 1) !== 0 && result.stderr) {
+    console.error(result.stderr);
+  }
+  return result.status ?? 1;
+}
+
 export function spawnInteractiveSsh(conn: SshConnection): number {
   const result = spawnSync('ssh', [...sshArgs(conn), sshTarget(conn)], {
     stdio: 'inherit',

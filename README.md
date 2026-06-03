@@ -121,13 +121,17 @@ instawp local start [name]
 instawp local stop [name]
 
 # Sync between local and cloud
-instawp local push <local-name> [cloud-site]    # push wp-content up (auto-creates the cloud site if needed)
-instawp local pull <local-name> <cloud-site>    # pull cloud wp-content down
+instawp local push <local-name> [cloud-site]            # push wp-content (files) up; pushes back to the cloned origin by default
+instawp local push <local-name> --with-db               # ALSO overwrite the cloud database with your local one (backs it up first)
+instawp local push <local-name> --with-db --dry-run     # preview the DB push (tables/rows/URL rewrite), no cloud writes
+instawp local pull <local-name> <cloud-site>            # pull cloud wp-content down
 
 # Manage local sites
 instawp local list
 instawp local delete <name> --force
 ```
+
+**Files vs. database:** `local push` syncs **files** (`wp-content`) by default — so plugins/themes/uploads, but **not** content like pages or posts (those live in the database). Add **`--with-db`** to also overwrite the cloud database with your local one. It backs up the cloud DB first, converts the local Playground SQLite to MySQL (data-only — it reuses the cloud's existing schema), imports it, and rewrites local→cloud URLs (serialization-safe). Best used on a cloned site, where local and cloud schemas match; tables that exist only locally (e.g. a plugin's custom tables created after cloning) are reported and skipped. Use `--dry-run` to preview, `--no-backup` to skip the safety backup (not recommended).
 
 ### Run Commands (WP-CLI + shell)
 
