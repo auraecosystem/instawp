@@ -68,6 +68,7 @@ jobs:
     permissions:
       contents: write   # create GitHub Releases
       id-token: write
+      actions: write    # dispatch release-notify.yml (Slack notification)
     steps:
       - uses: actions/checkout@v4
 
@@ -103,3 +104,13 @@ jobs:
             --notes-file - \
             --prerelease \
             --verify-tag
+
+      - name: Trigger release notification (Slack)
+        # release-notify uses anthropics/claude-code-action, which rejects the
+        # `push` event — so hand off via workflow_dispatch (GITHUB_TOKEN-driven
+        # dispatch is the documented exception that DOES start a run). Best
+        # effort: a notify hiccup must not fail an already-published release.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release-notify.yml --ref main -f tag="${GITHUB_REF_NAME}"

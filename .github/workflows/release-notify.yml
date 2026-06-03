@@ -1,20 +1,22 @@
 name: Release Notification
 
 # Posts a Claude-generated release summary to Slack when a new version is
-# published. The CLI releases by pushing a `v*` tag (see publish.yml), so —
-# unlike the other repos, which deploy on PR-merge-to-main — this fires on the
-# tag. Release notes come from the matching CHANGELOG section plus the commits
-# since the previous `v*` tag. The GitHub Release itself is created by
-# publish.yml; this step is the team-facing Slack notification.
+# published. Release notes come from the matching CHANGELOG section plus the
+# commits since the previous `v*` tag. The GitHub Release itself is created by
+# publish.yml; this is the team-facing Slack notification.
+#
+# Triggered via workflow_dispatch ONLY — `publish.yml` dispatches it after a
+# successful npm publish (and you can run it manually to backfill). It is NOT
+# triggered on `push`: the CLI releases by pushing a tag, but
+# anthropics/claude-code-action rejects the push event ("Unsupported event
+# type: push"), so the tag-push pipeline (publish.yml) hands off to this via
+# workflow_dispatch instead.
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to notify for (e.g. v0.0.1-beta.17). Defaults to the latest v* tag.'
+        description: 'Tag to notify for (e.g. v0.0.1-beta.18). Defaults to the latest v* tag.'
         required: false
         default: ''
 
