@@ -30,6 +30,7 @@ import { resolveSite } from '../lib/site-resolver.js';
 import { ensureSshAccess } from '../lib/ssh-keys.js';
 import { syncFiles, execViaSsh, execViaSshToFile } from '../lib/ssh-connection.js';
 import { listLocalFiles } from '../lib/sftp-sync.js';
+import { sanitizeName, defaultInstanceName, pushTargetRef } from '../lib/local-instance.js';
 import { success, error, table, spinner, info, isJsonMode } from '../lib/output.js';
 import type { LocalInstance } from '../types.js';
 
@@ -235,12 +236,18 @@ export function registerLocalCommand(program: Command): void {
 
       const localWpContent = join(instance.path, 'wp-content') + '/';
 
-      // A dry run must be side-effect free. With no cloud site specified, a real
-      // push would *create* one — which a dry run must never do — so preview the
-      // local files that would be pushed (pure filesystem walk, no network) and
-      // stop. Previously this provisioned a real site, then failed connecting to
-      // its not-yet-resolvable hostname ("Address lookup failed for host").
-      if (opts.dryRun && !cloudSiteArg) {
+      // Where does this push go? Explicit arg → the site this instance was
+      // cloned from (instance.cloudSiteId) → otherwise create a new site. This
+      // is the fix for "push after clone creates a new site": a cloned instance
+      // remembers its origin and pushes back to it.
+      const targetRef = pushTargetRef(cloudSiteArg, instance);
+
+      // A dry run must be side-effect free. With no target at all (no arg, not a
+      // cloned instance), a real push would *create* a site — which a dry run
+      // must never do — so preview the local files that would be pushed (pure
+      // filesystem walk, no network) and stop. Previously this provisioned a
+      // real site, then failed connecting to its not-yet-resolvable hostname.
+      if (opts.dryRun && !targetRef) {
         const excludes = ['database', 'db.php', 'mu-plugins', '.git', 'node_modules', '.DS_Store', ...(opts.exclude ?? [])];
         const files = listLocalFiles(join(instance.path, 'wp-content'), excludes);
         if (isJsonMode()) {
@@ -258,9 +265,30 @@ export function registerLocalCommand(program: Command): void {
         process.exit(1);
       }
 
-      // If no cloud site specified, create one
       let site;
-      if (!cloudSiteArg) {
+      if (targetRef) {
+        // Push to an existing site: the explicit arg, or this instance's origin.
+        const spin = spinner('Resolving cloud site...');
+        spin.start();
+        try {
+          site = await resolveSite(targetRef);
+          spin.succeed(`Cloud site: ${site.name || site.sub_domain} (ID: ${site.id})`);
+        } catch {
+          spin.fail('Site resolution failed');
+          process.exit(1);
+        }
+        if (!cloudSiteArg) {
+          info(`Pushing to the site this instance was cloned from (ID: ${site.id}). Pass a cloud site to override.`);
+        } else if (!instance.cloudSiteId) {
+          // First explicit push from an instance with no recorded origin (e.g.
+          // cloned before linking existed): remember it so future bare pushes
+          // target this site instead of creating a new one. Don't overwrite an
+          // origin that's already set.
+          setLocalInstance({ ...instance, cloudSiteId: site.id, cloudSiteName: site.name || site.sub_domain || String(site.id) });
+        }
+      } else {
+        // No arg and not a cloned instance — provision a new site named after
+        // the local instance.
         const spin = spinner('Creating cloud site...');
         spin.start();
         try {
@@ -299,19 +327,12 @@ export function registerLocalCommand(program: Command): void {
 
           // Re-resolve to get full details
           site = await resolveSite(String(site.id));
+          // Link this instance to the site it just created, so subsequent
+          // pushes target it instead of creating yet another site.
+          setLocalInstance({ ...instance, cloudSiteId: site.id, cloudSiteName: site.name || site.sub_domain || String(site.id) });
         } catch (err: any) {
           spin.fail('Failed to create cloud site');
           error(err.response?.data?.message || err.message);
-          process.exit(1);
-        }
-      } else {
-        const spin = spinner('Resolving cloud site...');
-        spin.start();
-        try {
-          site = await resolveSite(cloudSiteArg);
-          spin.succeed(`Cloud site: ${site.name || site.sub_domain} (ID: ${site.id})`);
-        } catch {
-          spin.fail('Site resolution failed');
           process.exit(1);
         }
       }
@@ -446,7 +467,7 @@ export function registerLocalCommand(program: Command): void {
 
       // 2. Create local instance
       const instances = getLocalInstances();
-      const name = sanitizeName(opts.name || site.name || site.sub_domain || `site-${site.id}`);
+      const name = opts.name ? sanitizeName(opts.name) : defaultInstanceName(site);
 
       if (instances[name]) {
         if (!opts.force) {
@@ -470,6 +491,10 @@ export function registerLocalCommand(program: Command): void {
         wp: site.wp_version || 'latest',
         path: dir,
         createdAt: new Date().toISOString(),
+        // Remember the origin so `local push` (no arg) pushes back here instead
+        // of creating a new site.
+        cloudSiteId: site.id,
+        cloudSiteName: site.name || site.sub_domain || String(site.id),
       };
       setLocalInstance(instance);
       success(`Local instance "${name}" created`);
@@ -755,9 +780,6 @@ function findAwk(): { cmd: string; prefixArgs: string[] } | null {
   return null;
 }
 
-function sanitizeName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
-}
 
 // Playground supports: 7.4, 8.0, 8.1, 8.2, 8.3, 8.4, 8.5
 const PLAYGROUND_PHP_VERSIONS = ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4', '8.5'];

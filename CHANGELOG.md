@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.1-beta.19 (2026-06-03)
+
+### Fixed — `local push` after `local clone` created a new site instead of pushing back
+- A cloned instance didn't remember which cloud site it came from, so `instawp local push <local>` (with no cloud-site argument) fell into the "create a new site" path and provisioned a **new** site named after the local instance — instead of pushing to the original. `local clone` now records the origin (`cloudSiteId`) on the instance, and `local push` targets it by default (explicit arg → cloned origin → otherwise create). Pushing with an explicit cloud site once also backfills the link on instances cloned before this fix.
+- **Also fixed** the cloned instance name: `local clone` derived it from the full domain, so `client-store-1234.instawp.site` became `client-store-1234-instawp-site`. It now uses the site name, or the first DNS label of the subdomain (`client-store-1234`).
+
 ## 0.0.1-beta.18 (2026-06-03)
 
 ### Fixed — `local push --dry-run` provisioned a real cloud site

@@ -102,4 +102,8 @@ export interface LocalInstance {
   wp: string;
   path: string;
   createdAt: string;
+  /** Cloud site this instance was cloned from — `local push` targets it by default. */
+  cloudSiteId?: number;
+  /** Display name of the origin cloud site (for messaging). */
+  cloudSiteName?: string;
 }
