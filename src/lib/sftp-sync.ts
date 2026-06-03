@@ -94,6 +94,27 @@ export function makeMatcher(patterns: string[]): (name: string, relPath: string)
   };
 }
 
+/**
+ * List the files a push would upload, relative to `root`, applying rsync-style
+ * excludes. Pure local filesystem walk — no network, no SSH. Used to preview a
+ * `local push --dry-run` without provisioning or connecting to a cloud site.
+ */
+export function listLocalFiles(root: string, excludes: string[]): string[] {
+  const isExcluded = makeMatcher(excludes);
+  const out: string[] = [];
+  const walk = (dir: string, rel: string): void => {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+      if (isExcluded(entry.name, childRel)) continue;
+      if (entry.isDirectory()) walk(join(dir, entry.name), childRel);
+      else if (entry.isFile()) out.push(childRel);
+    }
+  };
+  walk(root, '');
+  return out;
+}
+
 interface TransferTask {
   remote: string;
   local: string;

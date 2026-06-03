@@ -29,6 +29,7 @@ import { requireAuth, getClient } from '../lib/api.js';
 import { resolveSite } from '../lib/site-resolver.js';
 import { ensureSshAccess } from '../lib/ssh-keys.js';
 import { syncFiles, execViaSsh, execViaSshToFile } from '../lib/ssh-connection.js';
+import { listLocalFiles } from '../lib/sftp-sync.js';
 import { success, error, table, spinner, info, isJsonMode } from '../lib/output.js';
 import type { LocalInstance } from '../types.js';
 
@@ -232,12 +233,30 @@ export function registerLocalCommand(program: Command): void {
         process.exit(1);
       }
 
+      const localWpContent = join(instance.path, 'wp-content') + '/';
+
+      // A dry run must be side-effect free. With no cloud site specified, a real
+      // push would *create* one — which a dry run must never do — so preview the
+      // local files that would be pushed (pure filesystem walk, no network) and
+      // stop. Previously this provisioned a real site, then failed connecting to
+      // its not-yet-resolvable hostname ("Address lookup failed for host").
+      if (opts.dryRun && !cloudSiteArg) {
+        const excludes = ['database', 'db.php', 'mu-plugins', '.git', 'node_modules', '.DS_Store', ...(opts.exclude ?? [])];
+        const files = listLocalFiles(join(instance.path, 'wp-content'), excludes);
+        if (isJsonMode()) {
+          console.log(JSON.stringify({ success: true, dry_run: true, would_create_site: localName, files }));
+        } else {
+          info(`(dry run) Would create cloud site "${localName}" and push ${chalk.dim(localWpContent)}`);
+          for (const rel of files) console.log(`  ${chalk.dim('↑')} ${rel}`);
+          info(`(dry run) ${files.length} file(s) would be pushed. No cloud site was created.`);
+        }
+        return;
+      }
+
       if (!checkRsync()) {
         error('rsync is required for sync on macOS/Linux. Install: brew install rsync (macOS) or your distro package.');
         process.exit(1);
       }
-
-      const localWpContent = join(instance.path, 'wp-content') + '/';
 
       // If no cloud site specified, create one
       let site;

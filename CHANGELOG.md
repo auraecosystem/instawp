@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.1-beta.18 (2026-06-03)
+
+### Fixed — `local push --dry-run` provisioned a real cloud site
+- `instawp local push <name> --dry-run` with no cloud-site argument ran the "create a cloud site" path — so a dry run **provisioned a real, permanent cloud site**, then tried to connect to its not-yet-resolvable hostname and failed with `connect: Address lookup failed for host` / `rsync exited with code 1`. (Reported by QA on Windows; the bug was cross-platform.)
+- **Fix**: a dry run is now side-effect free. With no cloud site specified, it previews the local `wp-content` files that *would* be pushed (a pure local filesystem walk respecting the same excludes — no provisioning, no network) and reports that no site was created. Passing an existing cloud site (`local push <name> <site> --dry-run`) is unchanged.
+
 ## 0.0.1-beta.17 (2026-06-02)
 
 ### Fixed — `local start` / `local create` mount failure on Windows
