@@ -114,6 +114,11 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # publish.yml dispatches this via GITHUB_TOKEN, so the actor is
+          # github-actions[bot]; the action blocks bot actors unless allowed.
+          # Safe here: workflow_dispatch requires actions:write, so only trusted
+          # actors can trigger it.
+          allowed_bots: "*"
           prompt: |
             You are analyzing a published release of the cli repository (the InstaWP CLI — a TypeScript command-line tool published to npm as @instawp/cli, for managing WordPress sites, servers, snapshots/versions, and local development from the terminal).
 
