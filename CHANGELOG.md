@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.1-beta.21 (2026-06-04)
+
+### Fixed — `local push --with-db` broke wp-admin on sites with a custom table prefix
+- After a DB push, wp-admin became inaccessible on sites whose cloud table prefix isn't `wp_` (which is **most** InstaWP sites — they use a random prefix like `iwpa797_`). WordPress stores roles/capabilities under the table prefix (`{prefix}capabilities`, `{prefix}user_level` in usermeta; `{prefix}user_roles` in options). The local Playground DB is normalized to `wp_`, so the imported keys were `wp_capabilities` etc. — which the cloud (looking for `iwpa797_capabilities`) ignored, leaving the admin with no capabilities.
+- **Fix**: after import, `local push --with-db` now remaps those access-critical keys to the cloud's prefix (exact key names only — never touches plugin options). Verified end-to-end on a real custom-prefix site (admin role resolves, wp-admin accessible). If you hit this on beta.20, restore the cloud DB from the `~/db-backup-*.sql.gz` the push saved, update to beta.21, and re-push.
+
 ## 0.0.1-beta.20 (2026-06-03)
 
 ### Added — `local push --with-db` (push the database back to the cloud)

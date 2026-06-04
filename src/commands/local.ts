@@ -937,6 +937,32 @@ async function pushDatabase(instance: LocalInstance, site: any, conn: SshConnect
   }
   impSpin.succeed('Database imported');
 
+  // Remap table-prefix-embedded role/capability keys. WordPress stores these
+  // under the table prefix: wp_usermeta.{prefix}capabilities / {prefix}user_level
+  // and wp_options.{prefix}user_roles. The local DB uses the `wp_` prefix, so the
+  // imported keys are `wp_capabilities` etc.; if the cloud prefix differs, the
+  // admin user has NO capabilities and wp-admin becomes inaccessible. Rewrite the
+  // access-critical keys (exact names — safe, never touches plugin options) to the
+  // cloud prefix. (clone does the inverse when pulling down.)
+  if (cloudPrefix !== 'wp_') {
+    const capSpin = spinner('Remapping user roles/capabilities to the cloud prefix...');
+    capSpin.start();
+    const um = `${cloudPrefix}usermeta`;
+    const opt = `${cloudPrefix}options`;
+    const stmts = [
+      `UPDATE ${um} SET meta_key='${cloudPrefix}capabilities' WHERE meta_key='wp_capabilities'`,
+      `UPDATE ${um} SET meta_key='${cloudPrefix}user_level' WHERE meta_key='wp_user_level'`,
+      `UPDATE ${opt} SET option_name='${cloudPrefix}user_roles' WHERE option_name='wp_user_roles'`,
+    ];
+    let capOk = true;
+    for (const s of stmts) {
+      const r = execViaSsh(conn, `cd ${wpPath} && wp db query "${s}"`);
+      if (r.exitCode !== 0) { capOk = false; if (r.stderr) error(r.stderr.trim()); }
+    }
+    if (capOk) capSpin.succeed('Roles/capabilities remapped to cloud prefix');
+    else capSpin.fail('Could not remap roles/capabilities — wp-admin access may need a manual fix');
+  }
+
   // Rewrite local URL → cloud URL, serialization-safe via wp-cli.
   if (fromUrl !== toUrl) {
     if (isShellSafeUrl(fromUrl) && isShellSafeUrl(toUrl)) {

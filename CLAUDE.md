@@ -134,7 +134,9 @@ Pushes the local Playground DB back to the cloud MySQL, OVERWRITING it. Implemen
 3. `generateMysqlDump()`: **data-only** (`TRUNCATE`+`INSERT`, no `CREATE TABLE`) for local `wp_*` tables whose cloud-prefixed name exists on the cloud (intersection — so a missing-table TRUNCATE can't abort the import). Pins `sql_mode` (backslash escaping), `safeIntegers(true)` (no >2^53 loss), BLOB→`0x` hex (empty→`''`), byte-budgeted INSERT batching
 4. Refuse if 0 tables intersect (fail loud, never a silent no-op)
 5. Back up cloud DB (`wp db export | gzip`), abort if it fails (unless `--no-backup`)
-6. scp upload → `wp db import` → `wp search-replace <local-url> <cloud-url>` (serialization-safe — NOT done in SQL) → `wp cache flush`
+6. scp upload → `wp db import`
+7. If cloud prefix ≠ `wp_`: remap role/capability keys to the cloud prefix — `{prefix}capabilities`, `{prefix}user_level` (usermeta), `{prefix}user_roles` (options). Local is `wp_`-normalized, so without this the admin loses all capabilities and **wp-admin becomes inaccessible** (most InstaWP sites use a random prefix). Exact key names only — never touches plugin options.
+8. `wp search-replace <local-url> <cloud-url>` (serialization-safe — NOT done in SQL) → `wp cache flush`
 
 **Why no official tool:** WordPress has no SQLite→MySQL exporter — [sqlite-database-integration#36](https://github.com/WordPress/sqlite-database-integration/issues/36) is open since 2023; the community workaround regenerates schema with `text→varchar(255)` (truncates content) + `addslashes`. Our data-only approach (reuse cloud schema) avoids both. `wp db export` can't help (shells to mysqldump, absent in Playground). Caveat: assumes schema parity (true for clones); plugin tables created only-locally are skipped.
 
