@@ -3,8 +3,10 @@
 Create and manage WordPress sites from the terminal.
 
 ```
-npm install -g @instawp/cli@beta
+npm install -g @instawp/cli
 ```
+
+This installs the latest release. The CLI checks for updates once a day and `instawp upgrade` keeps you current (see [Updating](#updating)).
 
 > **Beta** — early release. Report issues at [github.com/InstaWP/cli/issues](https://github.com/InstaWP/cli/issues).
 
@@ -248,6 +250,8 @@ instawp wp <site> option get siteurl --json
 |----------|-------------|
 | `INSTAWP_TOKEN` | API token — skips `instawp login` |
 | `INSTAWP_API_URL` | Custom API base URL |
+| `INSTAWP_NO_UPDATE_NOTIFIER` | Silence the once-a-day update hint |
+| `INSTAWP_AUTO_UPGRADE` | Auto-install updates on the daily check (hands-off) |
 
 ### CI/CD Example
 
