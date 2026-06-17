@@ -264,6 +264,15 @@ instawp wp "pr-$PR_NUMBER" option get siteurl --api
 instawp sites delete "pr-$PR_NUMBER" --force
 ```
 
+## Updating
+
+```bash
+instawp upgrade          # update to the latest version
+instawp upgrade --check  # check only; don't install
+```
+
+The CLI checks for a new version **once a day** and prints a one-line hint (to stderr) when one is available. It never auto-installs and never pollutes command output — it's silenced automatically in `--json`, CI, and non-interactive shells. Opt into hands-off updates with `INSTAWP_AUTO_UPGRADE=1`, or silence the hint entirely with `INSTAWP_NO_UPDATE_NOTIFIER=1`.
+
 ## Requirements
 
 - Node.js 18+

@@ -70,6 +70,9 @@ instawp exec <site> <cmd...> [--api] [--timeout <s>]   # Raw shell (non-WP)
 instawp sql <site> "<query>"                           # SQL via WP-CLI (hits MySQL, cache-immune)
 instawp plugin install <site> <zip|dir> [--activate]   # install plugin (scp+wp for zip; rsync for dir)
 
+# Self-update (notifier checks npm once/day; suppressed in --json/CI/non-TTY)
+instawp upgrade [--check]                              # npm i -g @instawp/cli@latest
+
 # Teams
 instawp teams list
 instawp teams switch [team]          # client-side team context

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.1-beta.23 (2026-06-15)
+
+### Added — update notifier + `instawp upgrade`
+- The CLI now checks npm for a newer version **at most once a day** (cached in `~/.config/instawp/`) and prints a one-line hint to **stderr** when an update is available — e.g. `⚡ Update available: 0.0.1-beta.22 → beta.23 · run: instawp upgrade`. It's instant on cache hits and only does a short, timeout-bounded network call on the daily refresh.
+- **`instawp upgrade`** (alias `update`) self-updates via `npm i -g @instawp/cli@latest`; `--check` reports without installing.
+- **Never pollutes output or surprises you**: the hint is suppressed in `--json`, `CI`, and non-interactive shells (so harnesses never see it), and it never auto-installs by default. Opt into hands-off updates with `INSTAWP_AUTO_UPGRADE=1`; silence the hint with `INSTAWP_NO_UPDATE_NOTIFIER=1`.
+
 ## 0.0.1-beta.22 (2026-06-15)
 
 ### Added — `plugin install`, `sql`, and HTTP-ready `create`

@@ -14,6 +14,7 @@ const config = new Conf({
     site_cache: { type: 'object', default: {} },
     local_instances: { type: 'object', default: {} },
     team_id: { type: 'number', default: 0 },
+    update_check: { type: 'object', default: {} },
   },
 });
 
@@ -61,6 +62,24 @@ export function clearTeamId(): void {
 
 export function clearConfig(): void {
   config.clear();
+}
+
+// Update-notifier cache: when we last checked npm, and the newest version seen.
+interface UpdateCheck {
+  lastCheck: number;
+  latestVersion: string;
+}
+
+export function getUpdateCheck(): UpdateCheck | null {
+  const v = config.get('update_check') as Partial<UpdateCheck>;
+  if (v && typeof v.lastCheck === 'number') {
+    return { lastCheck: v.lastCheck, latestVersion: v.latestVersion || '' };
+  }
+  return null;
+}
+
+export function setUpdateCheck(latestVersion: string): void {
+  config.set('update_check', { lastCheck: Date.now(), latestVersion });
 }
 
 // Site resolution cache: maps identifier (name/domain) → site ID

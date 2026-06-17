@@ -17,6 +17,8 @@ import { registerLocalCommand } from './commands/local.js';
 import { registerDbCommand } from './commands/db.js';
 import { registerOpenCommand } from './commands/open.js';
 import { registerLogsCommand } from './commands/logs.js';
+import { registerUpgradeCommand } from './commands/upgrade.js';
+import { maybeNotifyUpdate } from './lib/update-notifier.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json');
@@ -62,6 +64,9 @@ registerTeamsCommand(program);
 
 // -- Local dev --
 registerLocalCommand(program);
+
+// -- Self-update --
+registerUpgradeCommand(program);
 
 // -- Changelog --
 program
@@ -116,6 +121,8 @@ ${d('Remote Access')}
   ${c('db')}     ${d('push|pull')}      Push/pull MySQL database (auto-backup)
   ${c('logs')}   ${d('<site>')}         Tail WP / PHP / nginx logs
   ${c('exec')}   ${d('<site>')} ${d('<cmd>')}  Run arbitrary shell (escape hatch for non-WP)
+  ${c('sql')}    ${d('<site>')} ${d('<query>')} Run SQL via WP-CLI (hits MySQL, cache-immune)
+  ${c('plugin install')}     Install a plugin from a local .zip or directory
 
 ${d('Local Development')}
   ${c('local create')}       Create and start a local WordPress site
@@ -131,6 +138,10 @@ ${d('Teams')}
   ${c('teams list')}         List teams
   ${c('teams switch')}       Switch active team
   ${c('teams members')}      List team members
+
+${d('Updating')}
+  ${c('upgrade')}            Update the CLI to the latest version
+  ${d('(checks once/day and shows a hint; INSTAWP_NO_UPDATE_NOTIFIER=1 to silence)')}
 
 ${d('Examples')}
   $ instawp login
@@ -173,4 +184,14 @@ program.configureHelp({
   },
 });
 
-program.parse();
+// Once-a-day update check (stderr banner; suppressed in --json/CI/non-TTY).
+// Skip for `upgrade`/`update` (it checks itself) and version/help.
+const firstArg = process.argv[2];
+const skipNotify = !firstArg || ['upgrade', 'update'].includes(firstArg)
+  || ['-V', '--version', '-h', '--help'].includes(firstArg);
+
+if (skipNotify) {
+  program.parse();
+} else {
+  maybeNotifyUpdate(version).finally(() => program.parse());
+}
