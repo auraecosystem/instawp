@@ -67,6 +67,8 @@ instawp db push <site> <file> [--force] [--no-backup]
 instawp db pull <site> [--output <path>] [--no-compress]
 instawp logs <site> [--wp] [--php] [--nginx] [--follow] [--lines <n>]
 instawp exec <site> <cmd...> [--api] [--timeout <s>]   # Raw shell (non-WP)
+instawp sql <site> "<query>"                           # SQL via WP-CLI (hits MySQL, cache-immune)
+instawp plugin install <site> <zip|dir> [--activate]   # install plugin (scp+wp for zip; rsync for dir)
 
 # Teams
 instawp teams list

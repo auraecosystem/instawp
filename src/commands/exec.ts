@@ -154,6 +154,21 @@ Examples:
     });
 }
 
+export function registerSqlCommand(program: Command): void {
+  program
+    .command('sql <site> <query>')
+    .description('Run a SQL query on a site\'s database (via WP-CLI; hits MySQL directly, bypasses object cache)')
+    .addHelpText('after', `
+Examples:
+  $ instawp sql my-site "SELECT option_value FROM wp_options WHERE option_name='siteurl'"
+  $ instawp sql my-site "SELECT COUNT(*) FROM wp_posts WHERE post_status='publish'"
+`)
+    .action(async (siteIdentifier: string, query: string) => {
+      // Route through the same shell-quoted SSH path as `wp db query`.
+      await execAction(siteIdentifier, ['wp', 'db', 'query', query], {});
+    });
+}
+
 export function registerWpCommand(program: Command): void {
   program
     .command('wp <site> [args...]')

@@ -10,7 +10,8 @@ import { registerSitesCommand, registerCreateAlias } from './commands/sites.js';
 import { registerVersionsCommand } from './commands/versions.js';
 import { registerSyncCommand } from './commands/sync.js';
 import { registerSshCommand } from './commands/ssh.js';
-import { registerExecCommand, registerWpCommand } from './commands/exec.js';
+import { registerExecCommand, registerWpCommand, registerSqlCommand } from './commands/exec.js';
+import { registerPluginCommand } from './commands/plugin.js';
 import { registerTeamsCommand } from './commands/teams.js';
 import { registerLocalCommand } from './commands/local.js';
 import { registerDbCommand } from './commands/db.js';
@@ -48,9 +49,11 @@ registerVersionsCommand(program);
 // -- Remote access --
 registerWpCommand(program);
 registerExecCommand(program);
+registerSqlCommand(program);
 registerSshCommand(program);
 registerSyncCommand(program);
 registerDbCommand(program);
+registerPluginCommand(program);
 registerLogsCommand(program);
 registerOpenCommand(program);
 

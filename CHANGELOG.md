@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.1-beta.22 (2026-06-15)
+
+### Added — `plugin install`, `sql`, and HTTP-ready `create`
+- **`instawp plugin install <site> <zip|dir> [--activate]`** — install a plugin from a local `.zip` (scp + `wp plugin install --force`) or directory (rsync into `wp-content/plugins/`, then activate). Removes the base64-over-exec dance.
+- **`instawp sql <site> "<query>"`** — run a SQL query via WP-CLI; hits MySQL directly so it's immune to the object cache (handy for verifying state behind a cache).
+- **`instawp create` now waits until the site answers HTTP**, not just until the provisioning task finishes — DNS/edge propagation lags task completion by 30–120s, so "Ready" now means actually reachable (no more hand-rolled curl-retry gates). `--no-wait` still returns immediately; `--json` includes `http_ready`.
+
+### Notes (from heavy CLI-driven test-harness use)
+- `exec`/`wp` faithfully forward argv with per-arg shell-quoting (since beta.21) — quoted multi-word args and `wp db query "…"` work without `--`. For **bulk file transfer use `sync push`** (rsync), not `exec`: passing large data as a command argument hits the OS `ARG_MAX` limit (that's a kernel limit, not a CLI cap), which is what made base64-over-exec unreliable.
+
 ## 0.0.1-beta.21 (2026-06-04)
 
 ### Fixed — `local push --with-db` broke wp-admin on sites with a custom table prefix

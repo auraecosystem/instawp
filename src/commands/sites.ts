@@ -390,6 +390,31 @@ export function registerSitesCommand(program: Command): void {
     });
 }
 
+/**
+ * Poll a URL until it answers (any HTTP status = DNS resolved + server up), or
+ * the budget runs out. A fresh site's DNS/edge lags task completion by 30–120s,
+ * so without this "Ready" lies and callers hand-roll curl-retry gates.
+ */
+async function waitForHttp(url: string, maxMs: number): Promise<boolean> {
+  const deadline = Date.now() + Math.min(Math.max(maxMs, 0), 180000);
+  while (Date.now() < deadline) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        await fetch(url, { signal: ctrl.signal, redirect: 'follow' });
+        return true; // any HTTP response means it's reachable
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      // DNS/connection not ready yet — back off and retry.
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  return false;
+}
+
 // Shared create action used by both `sites create` and top-level `create`
 async function createSiteAction(opts: any): Promise<void> {
   requireAuth();
@@ -535,6 +560,17 @@ async function createSiteAction(opts: any): Promise<void> {
             || siteData?.domain?.name || siteData?.domain || '';
           const wpVersion = siteInfo?.wp_version || '';
 
+          // Block until the site actually answers HTTP (DNS/edge lags the task).
+          let httpReady = false;
+          if (siteUrl) {
+            provSpin.start();
+            provSpin.text = 'Waiting for the site to respond...';
+            httpReady = await waitForHttp(siteUrl, maxWait - (Date.now() - startTime));
+            provSpin.stop();
+            if (httpReady) step('Site responding');
+            else if (!json) info('Provisioned, but not answering over HTTP yet (DNS may still be propagating).');
+          }
+
           if (json) {
             // If credentials not yet in details, try list endpoint
             let creds = meta;
@@ -558,6 +594,7 @@ async function createSiteAction(opts: any): Promise<void> {
                 wp_admin_url: siteUrl ? `${siteUrl}/wp-admin` : '',
                 magic_login_url: creds.wp_magic_login_url || (siteInfo?.hash ? `${getApiUrl()}/wordpress-auto-login?site=${siteInfo.hash}` : ''),
                 status: 'Active',
+                http_ready: httpReady,
                 elapsed: elapsed() + 's',
               },
             }));

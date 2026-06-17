@@ -59,7 +59,7 @@ instawp whoami
 instawp sites list
 instawp sites list --status active --all
 
-# Create a new site (waits for provisioning by default)
+# Create a new site (waits until the site answers HTTP; --no-wait to skip)
 instawp create --name my-site
 instawp create --name my-site --php 8.3
 instawp create --name my-site --temporary     # auto-expiring site
@@ -156,6 +156,19 @@ instawp exec <site> cat wp-config.php
 instawp wp <site> option get siteurl --api
 instawp exec <site> php -v --api
 ```
+
+### SQL & Plugins
+
+```bash
+# Run SQL directly (via WP-CLI; hits MySQL, bypasses object cache)
+instawp sql <site> "SELECT option_value FROM wp_options WHERE option_name='siteurl'"
+
+# Install a plugin from a local .zip or directory — no base64-over-exec needed
+instawp plugin install <site> ./my-plugin.zip --activate
+instawp plugin install <site> ./my-plugin/ --activate
+```
+
+For bulk file transfer (themes, plugins, uploads), use `sync push` (rsync) — it streams file contents, unlike `exec`, which is for commands and hits the OS argument-size limit on large inline payloads.
 
 ### SSH
 
