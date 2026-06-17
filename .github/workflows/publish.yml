@@ -86,6 +86,16 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Point `latest` at this release
+        # Pre-1.0 there's no separate stable channel, so `latest` — what a plain
+        # `npm i -g @instawp/cli` installs — must track the newest beta.
+        # Publishing with `--tag beta` does NOT move `latest`, which is how it
+        # got stranded on an ancient version. Keep them in sync until a stable
+        # 1.x exists (then publish stable to `latest` and drop this step).
+        run: npm dist-tag add "@instawp/cli@${GITHUB_REF_NAME#v}" latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Create GitHub Release from CHANGELOG
         env:
           GH_TOKEN: ${{ github.token }}
